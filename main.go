@@ -35,11 +35,11 @@ type ReactionEvent struct {
 }
 
 type PRMetadata struct {
-	PRNumber   int    `json:"pr_number"`
-	Repository string `json:"repository"`
-	PRUrl      string `json:"pr_url"`
-	Author     string `json:"author"`
-	Branch     string `json:"branch"`
+	PRNumber    int    `json:"pr_number"`
+	Repository  string `json:"repository"`
+	PRUrl       string `json:"pr_url"`
+	Author      string `json:"author"`
+	Branch      string `json:"branch"`
 	EventAction string `json:"event_action"`
 }
 
