@@ -177,10 +177,11 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 func getMessageMetadata(slackClient *slack.Client, channel, timestamp string) (*PRMetadata, error) {
 	// Fetch the message
 	historyParams := &slack.GetConversationHistoryParameters{
-		ChannelID: channel,
-		Latest:    timestamp,
-		Inclusive: true,
-		Limit:     1,
+		ChannelID:          channel,
+		Latest:             timestamp,
+		Inclusive:          true,
+		Limit:              1,
+		IncludeAllMetadata: true,
 	}
 
 	history, err := slackClient.GetConversationHistory(historyParams)
