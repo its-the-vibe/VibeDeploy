@@ -1,0 +1,20 @@
+services:
+  vibedeploy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vibedeploy:latest
+    container_name: vibedeploy
+    restart: unless-stopped
+    environment:
+      - REDIS_ADDR=${REDIS_ADDR:-localhost:6379}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - BASE_DIR=${BASE_DIR:-/app/repos}
+      - REDIS_PUBSUB_CHANNEL=${REDIS_PUBSUB_CHANNEL:-slack-relay-reaction-added}
+      - REDIS_LIST_NAME=${REDIS_LIST_NAME:-poppit-commands}
+    networks:
+      - vibedeploy-network
+
+networks:
+  vibedeploy-network:
+    driver: bridge
