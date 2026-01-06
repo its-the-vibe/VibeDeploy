@@ -22,6 +22,8 @@ type Config struct {
 	RedisListName string
 }
 
+const RocketReaction = "rocket"
+
 type ReactionEvent struct {
 	Event struct {
 		Type     string `json:"type"`
@@ -137,8 +139,8 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 	}
 
 	// Only process rocket emoji reactions
-	if event.Event.Reaction != "rocket" {
-		log.Printf("Ignoring reaction: %s (not rocket)", event.Event.Reaction)
+	if event.Event.Reaction != RocketReaction {
+		log.Printf("Ignoring reaction: %s (not %s)", event.Event.Reaction, RocketReaction)
 		return
 	}
 
@@ -148,7 +150,7 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 		return
 	}
 
-	log.Printf("Processing rocket reaction on message %s in channel %s", event.Event.Item.Ts, event.Event.Item.Channel)
+	log.Printf("Processing %s reaction on message %s in channel %s", RocketReaction, event.Event.Item.Ts, event.Event.Item.Channel)
 
 	// Fetch message from Slack
 	metadata, err := getMessageMetadata(slackClient, event.Event.Item.Channel, event.Event.Item.Ts)
@@ -196,7 +198,7 @@ func getMessageMetadata(slackClient *slack.Client, channel, timestamp string) (*
 	message := history.Messages[0]
 
 	// Check if message has metadata
-	if message.Metadata.EventPayload == nil || len(message.Metadata.EventPayload) == 0 {
+	if len(message.Metadata.EventPayload) == 0 {
 		return nil, nil
 	}
 
