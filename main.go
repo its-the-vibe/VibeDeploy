@@ -15,6 +15,7 @@ import (
 
 type Config struct {
 	RedisAddr     string
+	RedisPassword string
 	SlackToken    string
 	BaseDir       string
 	RedisPubSub   string
@@ -54,6 +55,7 @@ type PoppitCommand struct {
 func loadConfig() Config {
 	return Config{
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		SlackToken:    getEnv("SLACK_BOT_TOKEN", ""),
 		BaseDir:       getEnv("BASE_DIR", "/app/repos"),
 		RedisPubSub:   getEnv("REDIS_PUBSUB_CHANNEL", "slack-relay-reaction-added"),
@@ -80,7 +82,8 @@ func main() {
 
 	// Setup Redis client
 	redisClient := redis.NewClient(&redis.Options{
-		Addr: config.RedisAddr,
+		Addr:     config.RedisAddr,
+		Password: config.RedisPassword,
 	})
 	defer redisClient.Close()
 
