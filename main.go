@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/redis/go-redis/v9"
@@ -20,9 +21,82 @@ type Config struct {
 	BaseDir       string
 	RedisPubSub   string
 	RedisListName string
+	LogLevel      LogLevel
 }
 
 const RocketReaction = "rocket"
+
+// LogLevel represents the severity of a log message
+type LogLevel int
+
+const (
+	DEBUG LogLevel = iota
+	INFO
+	WARN
+	ERROR
+)
+
+var currentLogLevel = INFO // Default log level
+
+// String returns the string representation of a log level
+func (l LogLevel) String() string {
+	switch l {
+	case DEBUG:
+		return "DEBUG"
+	case INFO:
+		return "INFO"
+	case WARN:
+		return "WARN"
+	case ERROR:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// parseLogLevel converts a string to a LogLevel
+func parseLogLevel(level string) LogLevel {
+	switch strings.ToUpper(level) {
+	case "DEBUG":
+		return DEBUG
+	case "INFO":
+		return INFO
+	case "WARN":
+		return WARN
+	case "ERROR":
+		return ERROR
+	default:
+		return INFO
+	}
+}
+
+// logDebug logs a debug message
+func logDebug(format string, v ...interface{}) {
+	if currentLogLevel <= DEBUG {
+		log.Printf("[DEBUG] "+format, v...)
+	}
+}
+
+// logInfo logs an info message
+func logInfo(format string, v ...interface{}) {
+	if currentLogLevel <= INFO {
+		log.Printf("[INFO] "+format, v...)
+	}
+}
+
+// logWarn logs a warning message
+func logWarn(format string, v ...interface{}) {
+	if currentLogLevel <= WARN {
+		log.Printf("[WARN] "+format, v...)
+	}
+}
+
+// logError logs an error message
+func logError(format string, v ...interface{}) {
+	if currentLogLevel <= ERROR {
+		log.Printf("[ERROR] "+format, v...)
+	}
+}
 
 type ReactionEvent struct {
 	Event struct {
@@ -55,6 +129,7 @@ type PoppitCommand struct {
 }
 
 func loadConfig() Config {
+	logLevel := parseLogLevel(getEnv("LOG_LEVEL", "INFO"))
 	return Config{
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
@@ -62,6 +137,7 @@ func loadConfig() Config {
 		BaseDir:       getEnv("BASE_DIR", "/app/repos"),
 		RedisPubSub:   getEnv("REDIS_PUBSUB_CHANNEL", "slack-relay-reaction-added"),
 		RedisListName: getEnv("REDIS_LIST_NAME", "poppit-commands"),
+		LogLevel:      logLevel,
 	}
 }
 
@@ -74,6 +150,9 @@ func getEnv(key, defaultValue string) string {
 
 func main() {
 	config := loadConfig()
+
+	// Set the global log level
+	currentLogLevel = config.LogLevel
 
 	if config.SlackToken == "" {
 		log.Fatal("SLACK_BOT_TOKEN environment variable is required")
@@ -93,7 +172,7 @@ func main() {
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
-	log.Println("Connected to Redis")
+	logInfo("Connected to Redis at %s", config.RedisAddr)
 
 	// Setup Slack client
 	slackClient := slack.New(config.SlackToken)
@@ -102,7 +181,7 @@ func main() {
 	pubsub := redisClient.Subscribe(ctx, config.RedisPubSub)
 	defer pubsub.Close()
 
-	log.Printf("Subscribed to Redis channel: %s", config.RedisPubSub)
+	logInfo("Subscribed to Redis channel: %s (log level: %s)", config.RedisPubSub, config.LogLevel)
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -110,7 +189,7 @@ func main() {
 
 	go func() {
 		<-sigChan
-		log.Println("Shutting down...")
+		logInfo("Shutting down...")
 		cancel()
 	}()
 
@@ -119,13 +198,13 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Context cancelled, exiting")
+			logInfo("Context cancelled, exiting")
 			return
 		case msg := <-ch:
 			if msg == nil {
 				continue
 			}
-			log.Printf("Received message from channel: %s", config.RedisPubSub)
+			logDebug("Received message from channel: %s", config.RedisPubSub)
 			processReactionEvent(ctx, msg.Payload, slackClient, redisClient, config)
 		}
 	}
@@ -134,46 +213,46 @@ func main() {
 func processReactionEvent(ctx context.Context, payload string, slackClient *slack.Client, redisClient *redis.Client, config Config) {
 	var event ReactionEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
-		log.Printf("Error parsing reaction event: %v", err)
+		logError("Error parsing reaction event: %v", err)
 		return
 	}
 
 	// Only process rocket emoji reactions
 	if event.Event.Reaction != RocketReaction {
-		log.Printf("Ignoring reaction: %s (not %s)", event.Event.Reaction, RocketReaction)
+		logDebug("Ignoring reaction: %s (not %s)", event.Event.Reaction, RocketReaction)
 		return
 	}
 
 	// Only process message items
 	if event.Event.Item.Type != "message" {
-		log.Printf("Ignoring item type: %s (not message)", event.Event.Item.Type)
+		logDebug("Ignoring item type: %s (not message)", event.Event.Item.Type)
 		return
 	}
 
-	log.Printf("Processing %s reaction on message %s in channel %s", RocketReaction, event.Event.Item.Ts, event.Event.Item.Channel)
+	logInfo("Processing %s reaction on message %s in channel %s", RocketReaction, event.Event.Item.Ts, event.Event.Item.Channel)
 
 	// Fetch message from Slack
 	metadata, err := getMessageMetadata(slackClient, event.Event.Item.Channel, event.Event.Item.Ts)
 	if err != nil {
-		log.Printf("Error getting message metadata: %v", err)
+		logError("Error getting message metadata: %v", err)
 		return
 	}
 
 	if metadata == nil {
-		log.Println("No PR metadata found in message, skipping")
+		logDebug("No PR metadata found in message, skipping")
 		return
 	}
 
-	log.Printf("Found PR metadata: %s #%d (branch: %s)", metadata.Repository, metadata.PRNumber, metadata.Branch)
+	logInfo("Found PR metadata: %s #%d (branch: %s)", metadata.Repository, metadata.PRNumber, metadata.Branch)
 
 	// Create and publish Poppit command
 	poppitCmd := createPoppitCommand(metadata, config)
 	if err := publishPoppitCommand(ctx, redisClient, poppitCmd, config); err != nil {
-		log.Printf("Error publishing Poppit command: %v", err)
+		logError("Error publishing Poppit command: %v", err)
 		return
 	}
 
-	log.Printf("Successfully published Poppit command for %s branch %s", metadata.Repository, metadata.Branch)
+	logInfo("Successfully published Poppit command for %s branch %s", metadata.Repository, metadata.Branch)
 }
 
 func getMessageMetadata(slackClient *slack.Client, channel, timestamp string) (*PRMetadata, error) {
