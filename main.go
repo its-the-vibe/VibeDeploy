@@ -36,6 +36,8 @@ const (
 	ERROR
 )
 
+// currentLogLevel is set once at startup before any goroutines are created,
+// then only read during runtime, so no synchronization is needed
 var currentLogLevel = INFO // Default log level
 
 // String returns the string representation of a log level
