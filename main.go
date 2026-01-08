@@ -230,6 +230,7 @@ func createPoppitCommand(metadata *PRMetadata, config Config) PoppitCommand {
 		Type:   "vibe-deploy",
 		Dir:    dir,
 		Commands: []string{
+			"git fetch origin",
 			fmt.Sprintf("git checkout %s", metadata.Branch),
 			"docker compose build",
 			"docker compose down",
