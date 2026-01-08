@@ -181,7 +181,7 @@ func main() {
 	pubsub := redisClient.Subscribe(ctx, config.RedisPubSub)
 	defer pubsub.Close()
 
-	logInfo("Subscribed to Redis channel: %s (log level: %s)", config.RedisPubSub, config.LogLevel)
+	logInfo("Subscribed to Redis channel: %s (log level: %s)", config.RedisPubSub, config.LogLevel.String())
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
