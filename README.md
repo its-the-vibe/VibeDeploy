@@ -19,12 +19,25 @@ VibeDeploy is a Go service that listens for Slack emoji reactions (specifically 
 Configuration is done via environment variables:
 
 - `REDIS_ADDR` - Redis server address (default: `localhost:6379`)
+- `REDIS_PASSWORD` - Redis password (default: empty)
 - `SLACK_BOT_TOKEN` - Slack bot token (required)
 - `BASE_DIR` - Base directory for repositories (default: `/app/repos`)
 - `REDIS_PUBSUB_CHANNEL` - Redis pub/sub channel to subscribe to (default: `slack-relay-reaction-added`)
 - `REDIS_LIST_NAME` - Redis list name for Poppit commands (default: `poppit-commands`)
+- `LOG_LEVEL` - Logging level: `DEBUG`, `INFO`, `WARN`, or `ERROR` (default: `INFO`)
 
 See `.env.example` for a template.
+
+### Logging Levels
+
+VibeDeploy supports four logging levels:
+
+- **DEBUG** - Detailed information for debugging (includes ignored reactions, received messages, etc.)
+- **INFO** - General informational messages (connection status, processing events, successful operations)
+- **WARN** - Warning messages (currently unused)
+- **ERROR** - Error messages (parsing failures, API errors, etc.)
+
+The default log level is `INFO`, which provides a good balance between visibility and verbosity. Use `DEBUG` for troubleshooting and `ERROR` for production environments where you only want to see failures.
 
 ## Building
 
