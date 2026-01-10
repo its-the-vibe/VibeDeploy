@@ -158,7 +158,7 @@ func getEnv(key, defaultValue string) string {
 }
 
 // loadAllowedRepos loads the list of allowed repositories from the config file
-// Returns nil if no config file is specified or if the file doesn't exist (allow all repos)
+// Returns (nil, nil) if no config file is specified or if the file doesn't exist (allow all repos)
 func loadAllowedRepos(configPath string) (map[string]bool, error) {
 	// If no config path specified, allow all repos
 	if configPath == "" {
@@ -197,12 +197,12 @@ func loadAllowedRepos(configPath string) (map[string]bool, error) {
 // isRepoAllowed checks if a repository is in the allowed list
 // If allowedRepos is nil (no config), all repos are allowed
 func isRepoAllowed(repo string, allowedRepos map[string]bool) bool {
-	// If no whitelist is configured, allow all repos
+	// If no allowlist is configured, allow all repos
 	if allowedRepos == nil {
 		return true
 	}
 
-	// Check if repo is in the whitelist
+	// Check if repo is in the allowlist
 	return allowedRepos[repo]
 }
 

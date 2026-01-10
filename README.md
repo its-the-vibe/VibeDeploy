@@ -43,7 +43,7 @@ The default log level is `INFO`, which provides a good balance between visibilit
 
 ### Repository Filtering
 
-VibeDeploy supports optional repository filtering through a whitelist configuration file. This allows you to control which repositories can be deployed via emoji reactions.
+VibeDeploy supports optional repository filtering through an allowlist configuration file. This allows you to control which repositories can be deployed via emoji reactions.
 
 #### Configuration
 
@@ -70,7 +70,7 @@ allowed_repos:
   - its-the-vibe/Poppit
 ```
 
-When a rocket emoji reaction is detected on a message for a repository not in the whitelist, the reaction will be ignored and a log message will be generated.
+When a rocket emoji reaction is detected on a message for a repository not in the allowlist, the reaction will be ignored and a log message will be generated.
 
 ## Building
 
