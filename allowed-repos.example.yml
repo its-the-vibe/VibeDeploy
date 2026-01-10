@@ -1,0 +1,10 @@
+# Configuration file for allowed repositories
+# Only repositories listed here will be deployed when a rocket emoji reaction is detected
+# If this file is not present or ALLOWED_REPOS_CONFIG is not set, all repositories are allowed by default
+
+allowed_repos:
+  - its-the-vibe/VibeMerge
+  - its-the-vibe/VibeDeploy
+  - its-the-vibe/Poppit
+  # Add more repositories here as needed
+  # Format: owner/repository-name

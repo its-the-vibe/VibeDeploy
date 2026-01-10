@@ -16,3 +16,6 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_PUBSUB_CHANNEL=${REDIS_PUBSUB_CHANNEL:-slack-relay-reaction-added}
       - REDIS_LIST_NAME=${REDIS_LIST_NAME:-poppit-commands}
+      - ALLOWED_REPOS_CONFIG=${ALLOWED_REPOS_CONFIG:-/config/allowed-repos.yml}
+    volumes:
+      - ./allowed-repos.yml:/config/allowed-repos.yml:ro

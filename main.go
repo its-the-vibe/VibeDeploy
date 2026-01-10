@@ -12,16 +12,18 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/slack-go/slack"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	RedisAddr     string
-	RedisPassword string
-	SlackToken    string
-	BaseDir       string
-	RedisPubSub   string
-	RedisListName string
-	LogLevel      LogLevel
+	RedisAddr          string
+	RedisPassword      string
+	SlackToken         string
+	BaseDir            string
+	RedisPubSub        string
+	RedisListName      string
+	LogLevel           LogLevel
+	AllowedReposConfig string
 }
 
 const RocketReaction = "rocket"
@@ -122,6 +124,10 @@ type PRMetadata struct {
 	EventAction string `json:"event_action"`
 }
 
+type AllowedReposConfig struct {
+	AllowedRepos []string `yaml:"allowed_repos"`
+}
+
 type PoppitCommand struct {
 	Repo     string   `json:"repo"`
 	Branch   string   `json:"branch"`
@@ -133,13 +139,14 @@ type PoppitCommand struct {
 func loadConfig() Config {
 	logLevel := parseLogLevel(getEnv("LOG_LEVEL", "INFO"))
 	return Config{
-		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
-		RedisPassword: getEnv("REDIS_PASSWORD", ""),
-		SlackToken:    getEnv("SLACK_BOT_TOKEN", ""),
-		BaseDir:       getEnv("BASE_DIR", "/app/repos"),
-		RedisPubSub:   getEnv("REDIS_PUBSUB_CHANNEL", "slack-relay-reaction-added"),
-		RedisListName: getEnv("REDIS_LIST_NAME", "poppit-commands"),
-		LogLevel:      logLevel,
+		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
+		SlackToken:         getEnv("SLACK_BOT_TOKEN", ""),
+		BaseDir:            getEnv("BASE_DIR", "/app/repos"),
+		RedisPubSub:        getEnv("REDIS_PUBSUB_CHANNEL", "slack-relay-reaction-added"),
+		RedisListName:      getEnv("REDIS_LIST_NAME", "poppit-commands"),
+		LogLevel:           logLevel,
+		AllowedReposConfig: getEnv("ALLOWED_REPOS_CONFIG", ""),
 	}
 }
 
@@ -150,6 +157,55 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+// loadAllowedRepos loads the list of allowed repositories from the config file
+// Returns (nil, nil) if no config file is specified or if the file doesn't exist (allow all repos)
+func loadAllowedRepos(configPath string) (map[string]bool, error) {
+	// If no config path specified, allow all repos
+	if configPath == "" {
+		logInfo("No allowed repos config specified, allowing all repositories")
+		return nil, nil
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		logInfo("Allowed repos config file not found at %s, allowing all repositories", configPath)
+		return nil, nil
+	}
+
+	// Read the config file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read allowed repos config: %w", err)
+	}
+
+	// Parse YAML
+	var config AllowedReposConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse allowed repos config: %w", err)
+	}
+
+	// Convert to map for faster lookup
+	allowedRepos := make(map[string]bool)
+	for _, repo := range config.AllowedRepos {
+		allowedRepos[repo] = true
+	}
+
+	logInfo("Loaded %d allowed repositories from config", len(allowedRepos))
+	return allowedRepos, nil
+}
+
+// isRepoAllowed checks if a repository is in the allowed list
+// If allowedRepos is nil (no config), all repos are allowed
+func isRepoAllowed(repo string, allowedRepos map[string]bool) bool {
+	// If no allowlist is configured, allow all repos
+	if allowedRepos == nil {
+		return true
+	}
+
+	// Check if repo is in the allowlist
+	return allowedRepos[repo]
+}
+
 func main() {
 	config := loadConfig()
 
@@ -158,6 +214,12 @@ func main() {
 
 	if config.SlackToken == "" {
 		log.Fatal("SLACK_BOT_TOKEN environment variable is required")
+	}
+
+	// Load allowed repos configuration
+	allowedRepos, err := loadAllowedRepos(config.AllowedReposConfig)
+	if err != nil {
+		log.Fatalf("Failed to load allowed repos configuration: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -207,12 +269,12 @@ func main() {
 				continue
 			}
 			logDebug("Received message from channel: %s", config.RedisPubSub)
-			processReactionEvent(ctx, msg.Payload, slackClient, redisClient, config)
+			processReactionEvent(ctx, msg.Payload, slackClient, redisClient, config, allowedRepos)
 		}
 	}
 }
 
-func processReactionEvent(ctx context.Context, payload string, slackClient *slack.Client, redisClient *redis.Client, config Config) {
+func processReactionEvent(ctx context.Context, payload string, slackClient *slack.Client, redisClient *redis.Client, config Config, allowedRepos map[string]bool) {
 	var event ReactionEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		logError("Error parsing reaction event: %v", err)
@@ -246,6 +308,12 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 	}
 
 	logInfo("Found PR metadata: %s #%d (branch: %s)", metadata.Repository, metadata.PRNumber, metadata.Branch)
+
+	// Check if repository is allowed
+	if !isRepoAllowed(metadata.Repository, allowedRepos) {
+		logInfo("Repository %s is not in the allowed list, ignoring reaction", metadata.Repository)
+		return
+	}
 
 	// Create and publish Poppit command
 	poppitCmd := createPoppitCommand(metadata, config)
