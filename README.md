@@ -12,6 +12,7 @@ VibeDeploy is a Go service that listens for Slack emoji reactions (specifically 
 - Filters for "rocket" emoji reactions
 - Retrieves message details from Slack API
 - Extracts PR metadata from Slack messages
+- **Repository filtering** - Optional whitelist configuration to control which repositories can be deployed
 - Publishes deployment commands to Redis list for Poppit execution
 
 ## Configuration
@@ -25,6 +26,7 @@ Configuration is done via environment variables:
 - `REDIS_PUBSUB_CHANNEL` - Redis pub/sub channel to subscribe to (default: `slack-relay-reaction-added`)
 - `REDIS_LIST_NAME` - Redis list name for Poppit commands (default: `poppit-commands`)
 - `LOG_LEVEL` - Logging level: `DEBUG`, `INFO`, `WARN`, or `ERROR` (default: `INFO`)
+- `ALLOWED_REPOS_CONFIG` - Path to allowed repositories config file (YAML format, optional)
 
 See `.env.example` for a template.
 
@@ -38,6 +40,37 @@ VibeDeploy supports four logging levels:
 - **ERROR** - Error messages (parsing failures, API errors, etc.)
 
 The default log level is `INFO`, which provides a good balance between visibility and verbosity. Use `DEBUG` for troubleshooting and `ERROR` for production environments where you only want to see failures.
+
+### Repository Filtering
+
+VibeDeploy supports optional repository filtering through a whitelist configuration file. This allows you to control which repositories can be deployed via emoji reactions.
+
+#### Configuration
+
+Set the `ALLOWED_REPOS_CONFIG` environment variable to point to a YAML configuration file:
+
+```bash
+export ALLOWED_REPOS_CONFIG=/path/to/allowed-repos.yml
+```
+
+#### Behavior
+
+- **If `ALLOWED_REPOS_CONFIG` is not set**: All repositories are allowed (default behavior)
+- **If the config file doesn't exist**: All repositories are allowed (with a warning logged)
+- **If the config file exists**: Only repositories listed in the file will be deployed
+
+#### Config File Format
+
+See `allowed-repos.example.yml` for a sample configuration:
+
+```yaml
+allowed_repos:
+  - its-the-vibe/VibeMerge
+  - its-the-vibe/VibeDeploy
+  - its-the-vibe/Poppit
+```
+
+When a rocket emoji reaction is detected on a message for a repository not in the whitelist, the reaction will be ignored and a log message will be generated.
 
 ## Building
 
