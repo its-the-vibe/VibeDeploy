@@ -29,6 +29,8 @@ type Config struct {
 }
 
 const RocketReaction = "rocket"
+const VibeDeployType = "vibe-deploy"
+const DeploymentCommand = "docker compose up -d"
 
 // LogLevel represents the severity of a log message
 type LogLevel int
@@ -402,14 +404,14 @@ func createPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp
 	return PoppitCommand{
 		Repo:   metadata.Repository,
 		Branch: metadata.Branch,
-		Type:   "vibe-deploy",
+		Type:   VibeDeployType,
 		Dir:    dir,
 		Commands: []string{
 			"git fetch origin",
 			fmt.Sprintf("git checkout %s", metadata.Branch),
 			"docker compose build",
 			"docker compose down",
-			"docker compose up -d",
+			DeploymentCommand,
 			"git checkout main",
 		},
 		Metadata: &CommandMetadata{
@@ -464,14 +466,14 @@ func processCommandOutput(ctx context.Context, payload string, redisClient *redi
 	}
 
 	// Only process vibe-deploy type commands
-	if output.Type != "vibe-deploy" {
-		logDebug("Ignoring command output type: %s (not vibe-deploy)", output.Type)
+	if output.Type != VibeDeployType {
+		logDebug("Ignoring command output type: %s (not %s)", output.Type, VibeDeployType)
 		return
 	}
 
 	// Only process docker compose up -d command
-	if output.Command != "docker compose up -d" {
-		logDebug("Ignoring command: %s (not docker compose up -d)", output.Command)
+	if output.Command != DeploymentCommand {
+		logDebug("Ignoring command: %s (not %s)", output.Command, DeploymentCommand)
 		return
 	}
 
@@ -481,7 +483,7 @@ func processCommandOutput(ctx context.Context, payload string, redisClient *redi
 		return
 	}
 
-	logInfo("Processing completion for vibe-deploy in channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
+	logInfo("Processing completion for %s in channel %s, message %s", VibeDeployType, output.Metadata.Channel, output.Metadata.Ts)
 
 	// Publish slack reaction
 	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, config); err != nil {
