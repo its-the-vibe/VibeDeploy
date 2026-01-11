@@ -479,7 +479,7 @@ func processCommandOutput(ctx context.Context, payload string, redisClient *redi
 
 	// Check if metadata is present
 	if output.Metadata == nil {
-		logWarn("Command output missing metadata, cannot send reaction")
+		logWarn("Command output missing metadata (channel and timestamp required), cannot send reaction")
 		return
 	}
 
