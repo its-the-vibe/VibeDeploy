@@ -131,12 +131,12 @@ type AllowedReposConfig struct {
 }
 
 type PoppitCommand struct {
-	Repo     string            `json:"repo"`
-	Branch   string            `json:"branch"`
-	Type     string            `json:"type"`
-	Dir      string            `json:"dir"`
-	Commands []string          `json:"commands"`
-	Metadata *CommandMetadata  `json:"metadata,omitempty"`
+	Repo     string           `json:"repo"`
+	Branch   string           `json:"branch"`
+	Type     string           `json:"type"`
+	Dir      string           `json:"dir"`
+	Commands []string         `json:"commands"`
+	Metadata *CommandMetadata `json:"metadata,omitempty"`
 }
 
 type CommandMetadata struct {
