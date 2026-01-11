@@ -14,6 +14,7 @@ VibeDeploy is a Go service that listens for Slack emoji reactions (specifically 
 - Extracts PR metadata from Slack messages
 - **Repository filtering** - Optional whitelist configuration to control which repositories can be deployed
 - Publishes deployment commands to Redis list for Poppit execution
+- **Command output listening** - Listens for deployment completion and sends success reactions back to Slack
 
 ## Configuration
 
@@ -25,6 +26,8 @@ Configuration is done via environment variables:
 - `BASE_DIR` - Base directory for repositories (default: `/app/repos`)
 - `REDIS_PUBSUB_CHANNEL` - Redis pub/sub channel to subscribe to (default: `slack-relay-reaction-added`)
 - `REDIS_LIST_NAME` - Redis list name for Poppit commands (default: `poppit-commands`)
+- `REDIS_OUTPUT_CHANNEL` - Redis pub/sub channel for command output (default: `poppit:command-output`)
+- `REDIS_REACTION_LIST` - Redis list name for Slack reactions (default: `slack_reactions`)
 - `LOG_LEVEL` - Logging level: `DEBUG`, `INFO`, `WARN`, or `ERROR` (default: `INFO`)
 - `ALLOWED_REPOS_CONFIG` - Path to allowed repositories config file (YAML format, optional)
 
@@ -149,12 +152,47 @@ The service publishes commands to Redis in this format:
   "type": "vibe-deploy",
   "dir": "/app/repos/its-the-vibe/VibeMerge",
   "commands": [
+    "git fetch origin",
     "git checkout feature/add-metadata",
     "docker compose build",
     "docker compose down",
     "docker compose up -d",
     "git checkout main"
-  ]
+  ],
+  "metadata": {
+    "channel": "C123",
+    "ts": "1766236581.981479"
+  }
+}
+```
+
+### Command Output Messages
+
+VibeDeploy listens on the `poppit:command-output` channel for command completion messages from Poppit. When it receives a message indicating that the `docker compose up -d` command has completed for a `vibe-deploy` type deployment, it publishes a success reaction.
+
+Expected command output format from Poppit:
+
+```json
+{
+  "metadata": {
+    "channel": "C1234567890",
+    "ts": "1766282873.772199"
+  },
+  "type": "vibe-deploy",
+  "command": "docker compose up -d",
+  "output": "<command output>"
+}
+```
+
+### Slack Reaction Messages
+
+When deployment completes, VibeDeploy publishes a reaction message to the `slack_reactions` Redis list for SlackLiner to process:
+
+```json
+{
+  "reaction": "rocket",
+  "channel": "C1234567890",
+  "ts": "1766282873.772199"
 }
 ```
 
