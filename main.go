@@ -22,11 +22,15 @@ type Config struct {
 	BaseDir            string
 	RedisPubSub        string
 	RedisListName      string
+	RedisOutputChannel string
+	RedisReactionList  string
 	LogLevel           LogLevel
 	AllowedReposConfig string
 }
 
 const RocketReaction = "rocket"
+const VibeDeployType = "vibe-deploy"
+const DeploymentCommand = "docker compose up -d"
 
 // LogLevel represents the severity of a log message
 type LogLevel int
@@ -129,11 +133,30 @@ type AllowedReposConfig struct {
 }
 
 type PoppitCommand struct {
-	Repo     string   `json:"repo"`
-	Branch   string   `json:"branch"`
-	Type     string   `json:"type"`
-	Dir      string   `json:"dir"`
-	Commands []string `json:"commands"`
+	Repo     string           `json:"repo"`
+	Branch   string           `json:"branch"`
+	Type     string           `json:"type"`
+	Dir      string           `json:"dir"`
+	Commands []string         `json:"commands"`
+	Metadata *CommandMetadata `json:"metadata,omitempty"`
+}
+
+type CommandMetadata struct {
+	Channel string `json:"channel"`
+	Ts      string `json:"ts"`
+}
+
+type CommandOutput struct {
+	Metadata *CommandMetadata `json:"metadata"`
+	Type     string           `json:"type"`
+	Command  string           `json:"command"`
+	Output   string           `json:"output"`
+}
+
+type SlackReaction struct {
+	Reaction string `json:"reaction"`
+	Channel  string `json:"channel"`
+	Ts       string `json:"ts"`
 }
 
 func loadConfig() Config {
@@ -145,6 +168,8 @@ func loadConfig() Config {
 		BaseDir:            getEnv("BASE_DIR", "/app/repos"),
 		RedisPubSub:        getEnv("REDIS_PUBSUB_CHANNEL", "slack-relay-reaction-added"),
 		RedisListName:      getEnv("REDIS_LIST_NAME", "poppit-commands"),
+		RedisOutputChannel: getEnv("REDIS_OUTPUT_CHANNEL", "poppit:command-output"),
+		RedisReactionList:  getEnv("REDIS_REACTION_LIST", "slack_reactions"),
 		LogLevel:           logLevel,
 		AllowedReposConfig: getEnv("ALLOWED_REPOS_CONFIG", ""),
 	}
@@ -247,6 +272,9 @@ func main() {
 
 	logInfo("Subscribed to Redis channel: %s (log level: %s)", config.RedisPubSub, config.LogLevel.String())
 
+	// Start command output listener in a goroutine
+	go listenForCommandOutput(ctx, redisClient, config)
+
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -316,7 +344,7 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 	}
 
 	// Create and publish Poppit command
-	poppitCmd := createPoppitCommand(metadata, config)
+	poppitCmd := createPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
 	if err := publishPoppitCommand(ctx, redisClient, poppitCmd, config); err != nil {
 		logError("Error publishing Poppit command: %v", err)
 		return
@@ -370,21 +398,25 @@ func getMessageMetadata(slackClient *slack.Client, channel, timestamp string) (*
 	return &metadata, nil
 }
 
-func createPoppitCommand(metadata *PRMetadata, config Config) PoppitCommand {
+func createPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp string) PoppitCommand {
 	dir := fmt.Sprintf("%s/%s", config.BaseDir, metadata.Repository)
 
 	return PoppitCommand{
 		Repo:   metadata.Repository,
 		Branch: metadata.Branch,
-		Type:   "vibe-deploy",
+		Type:   VibeDeployType,
 		Dir:    dir,
 		Commands: []string{
 			"git fetch origin",
 			fmt.Sprintf("git checkout %s", metadata.Branch),
 			"docker compose build",
 			"docker compose down",
-			"docker compose up -d",
+			DeploymentCommand,
 			"git checkout main",
+		},
+		Metadata: &CommandMetadata{
+			Channel: channel,
+			Ts:      timestamp,
 		},
 	}
 }
@@ -396,6 +428,85 @@ func publishPoppitCommand(ctx context.Context, redisClient *redis.Client, cmd Po
 	}
 
 	if err := redisClient.RPush(ctx, config.RedisListName, payload).Err(); err != nil {
+		return fmt.Errorf("failed to push to Redis list: %w", err)
+	}
+
+	return nil
+}
+
+func listenForCommandOutput(ctx context.Context, redisClient *redis.Client, config Config) {
+	// Subscribe to command output channel
+	pubsub := redisClient.Subscribe(ctx, config.RedisOutputChannel)
+	defer pubsub.Close()
+
+	logInfo("Subscribed to Redis channel: %s", config.RedisOutputChannel)
+
+	// Process messages
+	ch := pubsub.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			logInfo("Command output listener context cancelled, exiting")
+			return
+		case msg := <-ch:
+			if msg == nil {
+				continue
+			}
+			logDebug("Received command output message from channel: %s", config.RedisOutputChannel)
+			processCommandOutput(ctx, msg.Payload, redisClient, config)
+		}
+	}
+}
+
+func processCommandOutput(ctx context.Context, payload string, redisClient *redis.Client, config Config) {
+	var output CommandOutput
+	if err := json.Unmarshal([]byte(payload), &output); err != nil {
+		logError("Error parsing command output: %v", err)
+		return
+	}
+
+	// Only process vibe-deploy type commands
+	if output.Type != VibeDeployType {
+		logDebug("Ignoring command output type: %s (not %s)", output.Type, VibeDeployType)
+		return
+	}
+
+	// Only process docker compose up -d command
+	if output.Command != DeploymentCommand {
+		logDebug("Ignoring command: %s (not %s)", output.Command, DeploymentCommand)
+		return
+	}
+
+	// Check if metadata is present
+	if output.Metadata == nil {
+		logWarn("Command output missing metadata (channel and timestamp required), cannot send reaction")
+		return
+	}
+
+	logInfo("Processing completion for %s in channel %s, message %s", VibeDeployType, output.Metadata.Channel, output.Metadata.Ts)
+
+	// Publish slack reaction
+	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, config); err != nil {
+		logError("Error publishing slack reaction: %v", err)
+		return
+	}
+
+	logInfo("Successfully published slack reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
+}
+
+func publishSlackReaction(ctx context.Context, redisClient *redis.Client, channel, timestamp string, config Config) error {
+	reaction := SlackReaction{
+		Reaction: RocketReaction,
+		Channel:  channel,
+		Ts:       timestamp,
+	}
+
+	payload, err := json.Marshal(reaction)
+	if err != nil {
+		return fmt.Errorf("failed to marshal slack reaction: %w", err)
+	}
+
+	if err := redisClient.RPush(ctx, config.RedisReactionList, payload).Err(); err != nil {
 		return fmt.Errorf("failed to push to Redis list: %w", err)
 	}
 

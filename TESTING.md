@@ -95,6 +95,94 @@ You should see a JSON payload like:
 }
 ```
 
+## Testing Command Output Listening
+
+### 1. Simulate Command Output from Poppit
+
+With the service running, publish a command output message:
+
+```bash
+redis-cli PUBLISH "poppit:command-output" '{
+  "metadata": {
+    "channel": "C1234567890",
+    "ts": "1766282873.772199"
+  },
+  "type": "vibe-deploy",
+  "command": "docker compose up -d",
+  "output": "Container started successfully"
+}'
+```
+
+### 2. Verify Slack Reaction Published
+
+Check the `slack_reactions` Redis list:
+
+```bash
+redis-cli LLEN slack_reactions
+redis-cli LPOP slack_reactions
+```
+
+You should see:
+
+```json
+{
+  "reaction": "rocket",
+  "channel": "C1234567890",
+  "ts": "1766282873.772199"
+}
+```
+
+### 3. Expected Log Output for Command Output
+
+When processing command output, you should see logs like:
+
+```
+Subscribed to Redis channel: poppit:command-output
+Received command output message from channel: poppit:command-output
+Processing completion for vibe-deploy in channel C1234567890, message 1766282873.772199
+Successfully published slack reaction for channel C1234567890, message 1766282873.772199
+```
+
+### 4. Negative Test Cases for Command Output
+
+#### Non-vibe-deploy Type
+
+```bash
+redis-cli PUBLISH "poppit:command-output" '{
+  "metadata": {"channel": "C123", "ts": "123.456"},
+  "type": "other-type",
+  "command": "docker compose up -d",
+  "output": "output"
+}'
+```
+
+Expected: Service logs "Ignoring command output type: other-type (not vibe-deploy)"
+
+#### Different Command
+
+```bash
+redis-cli PUBLISH "poppit:command-output" '{
+  "metadata": {"channel": "C123", "ts": "123.456"},
+  "type": "vibe-deploy",
+  "command": "git checkout main",
+  "output": "output"
+}'
+```
+
+Expected: Service logs "Ignoring command: git checkout main (not docker compose up -d)"
+
+#### Missing Metadata
+
+```bash
+redis-cli PUBLISH "poppit:command-output" '{
+  "type": "vibe-deploy",
+  "command": "docker compose up -d",
+  "output": "output"
+}'
+```
+
+Expected: Service logs "Command output missing metadata, cannot send reaction"
+
 ## Expected Log Output
 
 When processing a rocket reaction, you should see logs like:
@@ -102,6 +190,7 @@ When processing a rocket reaction, you should see logs like:
 ```
 Connected to Redis
 Subscribed to Redis channel: slack-relay-reaction-added
+Subscribed to Redis channel: poppit:command-output
 Received message from channel: slack-relay-reaction-added
 Processing rocket reaction on message 1234567890.123456 in channel C123
 Found PR metadata: its-the-vibe/VibeMerge #42 (branch: feature/add-metadata)
@@ -137,6 +226,12 @@ If the Slack message doesn't have PR metadata, the service should log:
 - Ensure the Slack message has PR metadata in the correct format
 - Check Slack API token permissions
 - Verify the message timestamp is correct
+
+### No slack reactions generated
+
+- Verify the command output message has the correct format
+- Check that `type` is "vibe-deploy" and `command` is "docker compose up -d"
+- Ensure metadata with channel and ts is present in the command output
 
 ### Connection errors
 
