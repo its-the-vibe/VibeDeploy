@@ -409,6 +409,7 @@ func createPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp
 		Commands: []string{
 			"git fetch origin",
 			fmt.Sprintf("git checkout %s", metadata.Branch),
+			"git pull",
 			"docker compose build",
 			"docker compose down",
 			DeploymentCommand,
