@@ -29,6 +29,7 @@ type Config struct {
 }
 
 const RocketReaction = "rocket"
+const GearReaction = "gear"
 const VibeDeployType = "vibe-deploy"
 const DeploymentCommand = "docker compose up -d"
 
@@ -157,6 +158,7 @@ type SlackReaction struct {
 	Reaction string `json:"reaction"`
 	Channel  string `json:"channel"`
 	Ts       string `json:"ts"`
+	Remove   bool   `json:"remove,omitempty"`
 }
 
 func loadConfig() Config {
@@ -343,6 +345,14 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 		return
 	}
 
+	// Publish gear reaction to indicate deployment is starting
+	if err := publishSlackReaction(ctx, redisClient, event.Event.Item.Channel, event.Event.Item.Ts, GearReaction, false, config); err != nil {
+		logError("Error publishing gear reaction: %v", err)
+		// Continue even if reaction fails - deployment should still proceed
+	} else {
+		logInfo("Published gear reaction for channel %s, message %s", event.Event.Item.Channel, event.Event.Item.Ts)
+	}
+
 	// Create and publish Poppit command
 	poppitCmd := createPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
 	if err := publishPoppitCommand(ctx, redisClient, poppitCmd, config); err != nil {
@@ -486,23 +496,32 @@ func processCommandOutput(ctx context.Context, payload string, redisClient *redi
 
 	logInfo("Processing completion for %s in channel %s, message %s", VibeDeployType, output.Metadata.Channel, output.Metadata.Ts)
 
-	// Publish slack reaction
-	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, config); err != nil {
-		logError("Error publishing slack reaction: %v", err)
-		return
+	// Remove gear reaction to indicate deployment is no longer in progress
+	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, GearReaction, true, config); err != nil {
+		logError("Error removing gear reaction: %v", err)
+		// Continue even if reaction removal fails
+	} else {
+		logInfo("Removed gear reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
 	}
 
-	logInfo("Successfully published slack reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
+	// Publish rocket reaction to indicate success
+	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, RocketReaction, false, config); err != nil {
+		logError("Error publishing rocket reaction: %v", err)
+		// Continue even if final reaction fails - deployment was still successful
+	} else {
+		logInfo("Successfully published rocket reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
+	}
 }
 
-func publishSlackReaction(ctx context.Context, redisClient *redis.Client, channel, timestamp string, config Config) error {
-	reaction := SlackReaction{
-		Reaction: RocketReaction,
+func publishSlackReaction(ctx context.Context, redisClient *redis.Client, channel, timestamp, reaction string, remove bool, config Config) error {
+	slackReaction := SlackReaction{
+		Reaction: reaction,
 		Channel:  channel,
 		Ts:       timestamp,
+		Remove:   remove,
 	}
 
-	payload, err := json.Marshal(reaction)
+	payload, err := json.Marshal(slackReaction)
 	if err != nil {
 		return fmt.Errorf("failed to marshal slack reaction: %w", err)
 	}
