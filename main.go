@@ -507,10 +507,10 @@ func processCommandOutput(ctx context.Context, payload string, redisClient *redi
 	// Publish rocket reaction to indicate success
 	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, RocketReaction, false, config); err != nil {
 		logError("Error publishing rocket reaction: %v", err)
-		return
+		// Continue even if final reaction fails - deployment was still successful
+	} else {
+		logInfo("Successfully published rocket reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
 	}
-
-	logInfo("Successfully published rocket reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
 }
 
 func publishSlackReaction(ctx context.Context, redisClient *redis.Client, channel, timestamp, reaction string, remove bool, config Config) error {
