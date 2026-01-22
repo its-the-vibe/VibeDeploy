@@ -13,8 +13,9 @@ VibeDeploy is a Go service that listens for Slack emoji reactions (specifically 
 - Retrieves message details from Slack API
 - Extracts PR metadata from Slack messages
 - **Repository filtering** - Optional whitelist configuration to control which repositories can be deployed
+- **Immediate feedback** - Sends a gear emoji reaction when deployment starts to provide immediate user feedback
 - Publishes deployment commands to Redis list for Poppit execution
-- **Command output listening** - Listens for deployment completion and sends success reactions back to Slack
+- **Command output listening** - Listens for deployment completion, removes the gear emoji, and sends a rocket emoji reaction to indicate success
 
 ## Configuration
 
@@ -186,8 +187,28 @@ Expected command output format from Poppit:
 
 ### Slack Reaction Messages
 
-When deployment completes, VibeDeploy publishes a reaction message to the `slack_reactions` Redis list for SlackLiner to process:
+VibeDeploy publishes reaction messages to the `slack_reactions` Redis list for SlackLiner to process:
 
+**When deployment starts** (gear emoji to indicate in-progress):
+```json
+{
+  "reaction": "gear",
+  "channel": "C1234567890",
+  "ts": "1766282873.772199"
+}
+```
+
+**When deployment completes** (remove gear emoji):
+```json
+{
+  "reaction": "gear",
+  "channel": "C1234567890",
+  "ts": "1766282873.772199",
+  "remove": true
+}
+```
+
+**When deployment completes** (rocket emoji to indicate success):
 ```json
 {
   "reaction": "rocket",
