@@ -118,6 +118,10 @@ type ReactionEvent struct {
 			Ts      string `json:"ts"`
 		} `json:"item"`
 	} `json:"event"`
+	Authorizations []struct {
+		UserID string `json:"user_id"`
+		IsBot  bool   `json:"is_bot"`
+	} `json:"authorizations"`
 }
 
 type PRMetadata struct {
@@ -321,6 +325,14 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 	if event.Event.Item.Type != "message" {
 		logDebug("Ignoring item type: %s (not message)", event.Event.Item.Type)
 		return
+	}
+
+	// Check if the reaction is from the bot itself by comparing with authorizations
+	for _, auth := range event.Authorizations {
+		if auth.IsBot && auth.UserID == event.Event.User {
+			logInfo("Ignoring %s reaction from bot user %s on message %s in channel %s", RocketReaction, event.Event.User, event.Event.Item.Ts, event.Event.Item.Channel)
+			return
+		}
 	}
 
 	logInfo("Processing %s reaction on message %s in channel %s", RocketReaction, event.Event.Item.Ts, event.Event.Item.Channel)
