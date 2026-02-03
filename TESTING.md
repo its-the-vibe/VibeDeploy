@@ -211,20 +211,17 @@ Expected: Service logs "Ignoring reaction: thumbsup (not rocket)"
 
 ### 2. Bot User Reactions
 
-To test bot reaction filtering, you need to know a bot user ID from your Slack workspace. You can find this by:
-- Looking at your Slack workspace's installed apps
-- Using the Slack API to list users and find bot users
-- Checking the user ID when a bot adds a reaction
+To test bot reaction filtering, the service now checks the `authorizations` field in the payload to detect if the reaction is from the bot itself.
 
-Publish an event with a bot user ID (replace `B123BOT` with an actual bot user ID):
+Publish an event where the bot user adds a reaction (replace `B123BOT` with your bot's user ID):
 
 ```redis
-PUBLISH slack-relay-reaction-added '{"event":{"type":"reaction_added","user":"B123BOT","reaction":"rocket","item":{"type":"message","channel":"C123","ts":"1234567890.123456"}}}'
+PUBLISH slack-relay-reaction-added '{"event":{"type":"reaction_added","user":"B123BOT","reaction":"rocket","item":{"type":"message","channel":"C123","ts":"1234567890.123456"}},"authorizations":[{"user_id":"B123BOT","is_bot":true}]}'
 ```
 
 Expected: Service logs "Ignoring rocket reaction from bot user B123BOT on message..."
 
-**Note:** This test requires a valid Slack bot token with `users:read` permission and a valid bot user ID from your workspace.
+**Note:** The service filters out reactions where the user ID matches a bot in the `authorizations` array. This prevents the bot from triggering deployments on its own reactions without requiring additional API calls.
 
 ### 3. Message Without Metadata
 
