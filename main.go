@@ -304,6 +304,14 @@ func main() {
 	}
 }
 
+func isUserBot(slackClient *slack.Client, userID string) (bool, error) {
+	user, err := slackClient.GetUserInfo(userID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get user info: %w", err)
+	}
+	return user.IsBot, nil
+}
+
 func processReactionEvent(ctx context.Context, payload string, slackClient *slack.Client, redisClient *redis.Client, config Config, allowedRepos map[string]bool) {
 	var event ReactionEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -320,6 +328,18 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 	// Only process message items
 	if event.Event.Item.Type != "message" {
 		logDebug("Ignoring item type: %s (not message)", event.Event.Item.Type)
+		return
+	}
+
+	// Check if the user is a bot
+	isBot, err := isUserBot(slackClient, event.Event.User)
+	if err != nil {
+		logError("Error checking if user is bot: %v", err)
+		return
+	}
+
+	if isBot {
+		logInfo("Ignoring %s reaction from bot user %s on message %s in channel %s", RocketReaction, event.Event.User, event.Event.Item.Ts, event.Event.Item.Channel)
 		return
 	}
 

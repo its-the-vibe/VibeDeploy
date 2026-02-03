@@ -209,7 +209,24 @@ PUBLISH slack-relay-reaction-added '{"event":{"type":"reaction_added","reaction"
 
 Expected: Service logs "Ignoring reaction: thumbsup (not rocket)"
 
-### 2. Message Without Metadata
+### 2. Bot User Reactions
+
+To test bot reaction filtering, you need to know a bot user ID from your Slack workspace. You can find this by:
+- Looking at your Slack workspace's installed apps
+- Using the Slack API to list users and find bot users
+- Checking the user ID when a bot adds a reaction
+
+Publish an event with a bot user ID (replace `B123BOT` with an actual bot user ID):
+
+```redis
+PUBLISH slack-relay-reaction-added '{"event":{"type":"reaction_added","user":"B123BOT","reaction":"rocket","item":{"type":"message","channel":"C123","ts":"1234567890.123456"}}}'
+```
+
+Expected: Service logs "Ignoring rocket reaction from bot user B123BOT on message..."
+
+**Note:** This test requires a valid Slack bot token with `users:read` permission and a valid bot user ID from your workspace.
+
+### 3. Message Without Metadata
 
 If the Slack message doesn't have PR metadata, the service should log:
 "No PR metadata found in message, skipping"
