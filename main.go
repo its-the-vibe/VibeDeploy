@@ -435,7 +435,10 @@ func createPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp
 			"docker compose build",
 			"docker compose down",
 			DeploymentCommand,
-			"git checkout main",
+			// try commenting out checking out main,
+			// so that projects which rely on the feature branch files
+			// might work
+			// "git checkout main",
 		},
 		Metadata: &CommandMetadata{
 			Channel: channel,
