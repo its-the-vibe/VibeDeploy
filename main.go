@@ -30,6 +30,7 @@ type Config struct {
 
 const RocketReaction = "rocket"
 const GearReaction = "gear"
+const ClassicalBuildingReaction = "classical_building"
 const VibeDeployType = "vibe-deploy"
 const DeploymentCommand = "docker compose up -d"
 
@@ -147,8 +148,9 @@ type PoppitCommand struct {
 }
 
 type CommandMetadata struct {
-	Channel string `json:"channel"`
-	Ts      string `json:"ts"`
+	Channel         string `json:"channel"`
+	Ts              string `json:"ts"`
+	TriggerReaction string `json:"trigger_reaction,omitempty"`
 }
 
 type CommandOutput struct {
@@ -315,9 +317,10 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 		return
 	}
 
-	// Only process rocket emoji reactions
-	if event.Event.Reaction != RocketReaction {
-		logDebug("Ignoring reaction: %s (not %s)", event.Event.Reaction, RocketReaction)
+	// Only process supported emoji reactions
+	reaction := event.Event.Reaction
+	if reaction != RocketReaction && reaction != ClassicalBuildingReaction {
+		logDebug("Ignoring reaction: %s (not %s or %s)", reaction, RocketReaction, ClassicalBuildingReaction)
 		return
 	}
 
@@ -330,12 +333,12 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 	// Check if the reaction is from the bot itself by comparing with authorizations
 	for _, auth := range event.Authorizations {
 		if auth.IsBot && auth.UserID == event.Event.User {
-			logInfo("Ignoring %s reaction from bot user %s on message %s in channel %s", RocketReaction, event.Event.User, event.Event.Item.Ts, event.Event.Item.Channel)
+			logInfo("Ignoring %s reaction from bot user %s on message %s in channel %s", reaction, event.Event.User, event.Event.Item.Ts, event.Event.Item.Channel)
 			return
 		}
 	}
 
-	logInfo("Processing %s reaction on message %s in channel %s", RocketReaction, event.Event.Item.Ts, event.Event.Item.Channel)
+	logInfo("Processing %s reaction on message %s in channel %s", reaction, event.Event.Item.Ts, event.Event.Item.Channel)
 
 	// Fetch message from Slack
 	metadata, err := getMessageMetadata(slackClient, event.Event.Item.Channel, event.Event.Item.Ts)
@@ -366,13 +369,18 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 	}
 
 	// Create and publish Poppit command
-	poppitCmd := createPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
+	var poppitCmd PoppitCommand
+	if reaction == ClassicalBuildingReaction {
+		poppitCmd = createMainBranchPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
+	} else {
+		poppitCmd = createPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
+	}
 	if err := publishPoppitCommand(ctx, redisClient, poppitCmd, config); err != nil {
 		logError("Error publishing Poppit command: %v", err)
 		return
 	}
 
-	logInfo("Successfully published Poppit command for %s branch %s", metadata.Repository, metadata.Branch)
+	logInfo("Successfully published Poppit command for %s branch %s", metadata.Repository, poppitCmd.Branch)
 }
 
 func getMessageMetadata(slackClient *slack.Client, channel, timestamp string) (*PRMetadata, error) {
@@ -441,8 +449,32 @@ func createPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp
 			// "git checkout main",
 		},
 		Metadata: &CommandMetadata{
-			Channel: channel,
-			Ts:      timestamp,
+			Channel:         channel,
+			Ts:              timestamp,
+			TriggerReaction: RocketReaction,
+		},
+	}
+}
+
+func createMainBranchPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp string) PoppitCommand {
+	dir := fmt.Sprintf("%s/%s", config.BaseDir, metadata.Repository)
+
+	return PoppitCommand{
+		Repo:   metadata.Repository,
+		Branch: "main",
+		Type:   VibeDeployType,
+		Dir:    dir,
+		Commands: []string{
+			"git checkout main",
+			"git pull",
+			"docker compose build",
+			"docker compose down",
+			DeploymentCommand,
+		},
+		Metadata: &CommandMetadata{
+			Channel:         channel,
+			Ts:              timestamp,
+			TriggerReaction: ClassicalBuildingReaction,
 		},
 	}
 }
@@ -519,12 +551,18 @@ func processCommandOutput(ctx context.Context, payload string, redisClient *redi
 		logInfo("Removed gear reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
 	}
 
-	// Publish rocket reaction to indicate success
-	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, RocketReaction, false, config); err != nil {
-		logError("Error publishing rocket reaction: %v", err)
+	// Determine which emoji to add on completion based on the trigger reaction
+	completionReaction := output.Metadata.TriggerReaction
+	if completionReaction == "" {
+		completionReaction = RocketReaction
+	}
+
+	// Publish completion reaction to indicate success
+	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, completionReaction, false, config); err != nil {
+		logError("Error publishing %s reaction: %v", completionReaction, err)
 		// Continue even if final reaction fails - deployment was still successful
 	} else {
-		logInfo("Successfully published rocket reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
+		logInfo("Successfully published %s reaction for channel %s, message %s", completionReaction, output.Metadata.Channel, output.Metadata.Ts)
 	}
 }
 
