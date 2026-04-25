@@ -1,6 +1,41 @@
 # VibeDeploy Manual Testing Guide
 
-This document describes how to manually test VibeDeploy.
+This document describes how to test VibeDeploy, both automatically and manually.
+
+## Automated Tests
+
+Unit tests live in `main_test.go` and cover the core pure functions.
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Or run directly with go test
+go test -v -race ./...
+```
+
+### Test Coverage
+
+```bash
+# Run tests and view coverage summary
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+
+# Open an HTML coverage report in your browser
+go tool cover -html=coverage.out
+```
+
+### What is Tested
+
+- `parseLogLevel` – converts log-level strings to `LogLevel` constants
+- `LogLevel.String()` – returns the string representation of a log level
+- `getEnv` – environment variable lookup with defaults
+- `isRepoAllowed` – repository allowlist enforcement
+- `createPoppitCommand` – Poppit command generation for feature branches
+- `createMainBranchPoppitCommand` – Poppit command generation for the main branch
+- `loadAllowedRepos` – loading the allowed repositories YAML config
 
 ## Prerequisites
 

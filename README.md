@@ -1,5 +1,7 @@
 # VibeDeploy
 
+[![CI](https://github.com/its-the-vibe/VibeDeploy/actions/workflows/ci.yaml/badge.svg)](https://github.com/its-the-vibe/VibeDeploy/actions/workflows/ci.yaml)
+
 Listen for emoji reactions and deploy feature branches
 
 ## Overview
@@ -84,10 +86,34 @@ When a rocket emoji reaction is detected on a message for a repository not in th
 go build -o vibedeploy .
 ```
 
+Or use Make:
+
+```bash
+make build
+```
+
 ### Docker Build
 
 ```bash
 docker compose build
+```
+
+## Running CI Locally
+
+Use the Makefile to run the same checks as CI:
+
+```bash
+# Lint (go vet)
+make lint
+
+# Build
+make build
+
+# Run unit tests with race detector and coverage
+make test
+
+# Run all CI checks
+make ci
 ```
 
 ## Running
