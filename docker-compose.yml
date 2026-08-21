@@ -3,7 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: vibedeploy:latest
+    image: ghcr.io/its-the-vibe/vibedeploy:latest
+    pull_policy: always
     container_name: vibedeploy
     read_only: true
     extra_hosts:
