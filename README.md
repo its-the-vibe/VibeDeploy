@@ -33,6 +33,7 @@ Configuration is done via environment variables:
 - `REDIS_REACTION_LIST` - Redis list name for Slack reactions (default: `slack_reactions`)
 - `LOG_LEVEL` - Logging level: `DEBUG`, `INFO`, `WARN`, or `ERROR` (default: `INFO`)
 - `ALLOWED_REPOS_CONFIG` - Path to allowed repositories config file (YAML format, optional)
+- `LEGACY_DOCKER_APPS_CONFIG` - Path to legacy Docker apps config file (YAML format, optional)
 
 See `.env.example` for a template.
 
@@ -77,6 +78,35 @@ allowed_repos:
 ```
 
 When a rocket emoji reaction is detected on a message for a repository not in the allowlist, the reaction will be ignored and a log message will be generated.
+
+### Deployment Workflows (GHA vs Legacy Docker)
+
+VibeDeploy supports two deployment patterns for feature branch deployments via the rocket emoji:
+
+1. **Legacy Docker Apps**: Repositories listed under `legacyDockerApps` in the YAML configuration specified by `LEGACY_DOCKER_APPS_CONFIG` use the traditional deployment flow:
+   - `git fetch origin`
+   - `git checkout <branch>`
+   - `git pull`
+   - `docker compose build`
+   - `docker compose down`
+   - `docker compose up -d`
+
+2. **GHA-Enabled Projects**: Repositories NOT listed in `legacyDockerApps` default to the GitHub Actions workflow:
+   - `git fetch`
+   - `git checkout <branch>`
+   - `../vibebox/docker-override/docker-override create --override-tag feature`
+   - `gh label create "feature" --color "f107a3" --force --repo <repo>`
+   - `gh pr edit --add-label "feature" <pr_url>`
+
+#### Configuration File Format
+
+See `legacy-docker-apps.example.yml` for a sample configuration:
+
+```yaml
+legacyDockerApps:
+  - its-the-vibe/OldApp1
+  - its-the-vibe/OldApp2
+```
 
 ## Building
 

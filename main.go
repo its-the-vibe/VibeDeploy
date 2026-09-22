@@ -16,16 +16,17 @@ import (
 )
 
 type Config struct {
-	RedisAddr          string
-	RedisPassword      string
-	SlackToken         string
-	BaseDir            string
-	RedisPubSub        string
-	RedisListName      string
-	RedisOutputChannel string
-	RedisReactionList  string
-	LogLevel           LogLevel
-	AllowedReposConfig string
+	RedisAddr              string
+	RedisPassword          string
+	SlackToken             string
+	BaseDir                string
+	RedisPubSub            string
+	RedisListName          string
+	RedisOutputChannel     string
+	RedisReactionList      string
+	LogLevel               LogLevel
+	AllowedReposConfig     string
+	LegacyDockerAppsConfig string
 }
 
 const RocketReaction = "rocket"
@@ -138,6 +139,10 @@ type AllowedReposConfig struct {
 	AllowedRepos []string `yaml:"allowed_repos"`
 }
 
+type LegacyDockerAppsConfig struct {
+	LegacyDockerApps []string `yaml:"legacyDockerApps"`
+}
+
 type PoppitCommand struct {
 	Repo     string           `json:"repo"`
 	Branch   string           `json:"branch"`
@@ -178,8 +183,9 @@ func loadConfig() Config {
 		RedisListName:      getEnv("REDIS_LIST_NAME", "poppit-commands"),
 		RedisOutputChannel: getEnv("REDIS_OUTPUT_CHANNEL", "poppit:command-output"),
 		RedisReactionList:  getEnv("REDIS_REACTION_LIST", "slack_reactions"),
-		LogLevel:           logLevel,
-		AllowedReposConfig: getEnv("ALLOWED_REPOS_CONFIG", ""),
+		LogLevel:               logLevel,
+		AllowedReposConfig:     getEnv("ALLOWED_REPOS_CONFIG", ""),
+		LegacyDockerAppsConfig: getEnv("LEGACY_DOCKER_APPS_CONFIG", ""),
 	}
 }
 
@@ -227,6 +233,43 @@ func loadAllowedRepos(configPath string) (map[string]bool, error) {
 	return allowedRepos, nil
 }
 
+// loadLegacyDockerApps loads the list of legacy Docker applications from the config file
+// Returns (nil, nil) if no config file is specified or if the file doesn't exist (no legacy apps)
+func loadLegacyDockerApps(configPath string) (map[string]bool, error) {
+	// If no config path specified, no repos are legacy docker apps
+	if configPath == "" {
+		logInfo("No legacy docker apps config specified, treating all repos as GHA-enabled")
+		return nil, nil
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		logInfo("Legacy docker apps config file not found at %s, treating all repos as GHA-enabled", configPath)
+		return nil, nil
+	}
+
+	// Read the config file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read legacy docker apps config: %w", err)
+	}
+
+	// Parse YAML
+	var config LegacyDockerAppsConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse legacy docker apps config: %w", err)
+	}
+
+	// Convert to map for faster lookup
+	legacyApps := make(map[string]bool)
+	for _, repo := range config.LegacyDockerApps {
+		legacyApps[repo] = true
+	}
+
+	logInfo("Loaded %d legacy docker apps from config", len(legacyApps))
+	return legacyApps, nil
+}
+
 // isRepoAllowed checks if a repository is in the allowed list
 // If allowedRepos is nil (no config), all repos are allowed
 func isRepoAllowed(repo string, allowedRepos map[string]bool) bool {
@@ -237,6 +280,14 @@ func isRepoAllowed(repo string, allowedRepos map[string]bool) bool {
 
 	// Check if repo is in the allowlist
 	return allowedRepos[repo]
+}
+
+// isLegacyDockerApp checks if a repository is in the legacy docker apps list
+func isLegacyDockerApp(repo string, legacyApps map[string]bool) bool {
+	if legacyApps == nil {
+		return false
+	}
+	return legacyApps[repo]
 }
 
 func main() {
@@ -253,6 +304,12 @@ func main() {
 	allowedRepos, err := loadAllowedRepos(config.AllowedReposConfig)
 	if err != nil {
 		log.Fatalf("Failed to load allowed repos configuration: %v", err)
+	}
+
+	// Load legacy docker apps configuration
+	legacyApps, err := loadLegacyDockerApps(config.LegacyDockerAppsConfig)
+	if err != nil {
+		log.Fatalf("Failed to load legacy docker apps configuration: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -305,12 +362,12 @@ func main() {
 				continue
 			}
 			logDebug("Received message from channel: %s", config.RedisPubSub)
-			processReactionEvent(ctx, msg.Payload, slackClient, redisClient, config, allowedRepos)
+			processReactionEvent(ctx, msg.Payload, slackClient, redisClient, config, allowedRepos, legacyApps)
 		}
 	}
 }
 
-func processReactionEvent(ctx context.Context, payload string, slackClient *slack.Client, redisClient *redis.Client, config Config, allowedRepos map[string]bool) {
+func processReactionEvent(ctx context.Context, payload string, slackClient *slack.Client, redisClient *redis.Client, config Config, allowedRepos map[string]bool, legacyApps map[string]bool) {
 	var event ReactionEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		logError("Error parsing reaction event: %v", err)
@@ -372,8 +429,10 @@ func processReactionEvent(ctx context.Context, payload string, slackClient *slac
 	var poppitCmd PoppitCommand
 	if reaction == ClassicalBuildingReaction {
 		poppitCmd = createMainBranchPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
-	} else {
+	} else if isLegacyDockerApp(metadata.Repository, legacyApps) {
 		poppitCmd = createPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
+	} else {
+		poppitCmd = createGHAEnabledPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
 	}
 	if err := publishPoppitCommand(ctx, redisClient, poppitCmd, config); err != nil {
 		logError("Error publishing Poppit command: %v", err)
@@ -447,6 +506,29 @@ func createPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp
 			// so that projects which rely on the feature branch files
 			// might work
 			// "git checkout main",
+		},
+		Metadata: &CommandMetadata{
+			Channel:         channel,
+			Ts:              timestamp,
+			TriggerReaction: RocketReaction,
+		},
+	}
+}
+
+func createGHAEnabledPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp string) PoppitCommand {
+	dir := fmt.Sprintf("%s/%s", config.BaseDir, metadata.Repository)
+
+	return PoppitCommand{
+		Repo:   metadata.Repository,
+		Branch: metadata.Branch,
+		Type:   VibeDeployType,
+		Dir:    dir,
+		Commands: []string{
+			"git fetch",
+			fmt.Sprintf("git checkout %s", metadata.Branch),
+			"../vibebox/docker-override/docker-override create --override-tag feature",
+			fmt.Sprintf("gh label create \"feature\" --color \"f107a3\" --force --repo %s", metadata.Repository),
+			fmt.Sprintf("gh pr edit --add-label \"feature\" %s", metadata.PRUrl),
 		},
 		Metadata: &CommandMetadata{
 			Channel:         channel,
