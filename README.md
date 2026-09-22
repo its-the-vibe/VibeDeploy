@@ -33,8 +33,6 @@ Configuration is done via environment variables:
 - `REDIS_REACTION_LIST` - Redis list name for Slack reactions (default: `slack_reactions`)
 - `LOG_LEVEL` - Logging level: `DEBUG`, `INFO`, `WARN`, or `ERROR` (default: `INFO`)
 - `VIBEDEPLY_CONFIG` - Path to combined VibeDeploy config file (YAML format, optional)
-- `ALLOWED_REPOS_CONFIG` - Path to allowed repositories config file (deprecated, optional)
-- `LEGACY_DOCKER_APPS_CONFIG` - Path to legacy Docker apps config file (deprecated, optional)
 
 See `.env.example` for a template.
 

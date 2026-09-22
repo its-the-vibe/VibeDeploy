@@ -352,46 +352,6 @@ allowedRepos:
 		}
 	})
 
-	t.Run("falls back to legacy separate config files", func(t *testing.T) {
-		allowedFile, err := os.CreateTemp("", "allowed-*.yml")
-		if err != nil {
-			t.Fatalf("failed to create temp file: %v", err)
-		}
-		defer os.Remove(allowedFile.Name())
-
-		allowedFile.WriteString("allowed_repos:\n  - its-the-vibe/Repo1\n")
-		allowedFile.Close()
-
-		legacyFile, err := os.CreateTemp("", "legacy-*.yml")
-		if err != nil {
-			t.Fatalf("failed to create temp file: %v", err)
-		}
-		defer os.Remove(legacyFile.Name())
-
-		legacyFile.WriteString("legacyDockerApps:\n  - its-the-vibe/Old1\n")
-		legacyFile.Close()
-
-		cfg := Config{
-			AllowedReposConfig:     allowedFile.Name(),
-			LegacyDockerAppsConfig: legacyFile.Name(),
-		}
-
-		allowed, legacy, override, err := loadVibeDeployConfig(cfg)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if !allowed["its-the-vibe/Repo1"] {
-			t.Errorf("expected Repo1 in allowed repos")
-		}
-		if !legacy["its-the-vibe/Old1"] {
-			t.Errorf("expected Old1 in legacy apps")
-		}
-		if override != DefaultDockerOverride {
-			t.Errorf("expected default docker override path")
-		}
-	})
-
 	t.Run("returns defaults when no config file specified or present", func(t *testing.T) {
 		cfg := Config{}
 		allowed, legacy, override, err := loadVibeDeployConfig(cfg)

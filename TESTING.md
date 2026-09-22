@@ -36,7 +36,7 @@ go tool cover -html=coverage.out
 - `createPoppitCommand` – Poppit command generation for feature branches
 - `createGHAEnabledPoppitCommand` – Poppit command generation with `dockerOverride` template injection
 - `createMainBranchPoppitCommand` – Poppit command generation for the main branch
-- `loadVibeDeployConfig` – combined YAML config loading, legacy fallback, and defaults
+- `loadVibeDeployConfig` – combined YAML config loading and defaults
 
 ## Prerequisites
 
