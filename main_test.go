@@ -86,6 +86,28 @@ func TestGetEnv(t *testing.T) {
 	})
 }
 
+func TestIsLegacyDockerApp(t *testing.T) {
+	t.Run("nil legacyApps returns false", func(t *testing.T) {
+		if isLegacyDockerApp("any/repo", nil) {
+			t.Error("isLegacyDockerApp() should return false when legacyApps is nil")
+		}
+	})
+
+	t.Run("repo in legacyApps is identified as legacy", func(t *testing.T) {
+		legacy := map[string]bool{"its-the-vibe/OldApp": true}
+		if !isLegacyDockerApp("its-the-vibe/OldApp", legacy) {
+			t.Error("isLegacyDockerApp() should return true for a listed legacy repo")
+		}
+	})
+
+	t.Run("repo not in legacyApps is not legacy", func(t *testing.T) {
+		legacy := map[string]bool{"its-the-vibe/OldApp": true}
+		if isLegacyDockerApp("its-the-vibe/NewApp", legacy) {
+			t.Error("isLegacyDockerApp() should return false for an unlisted repo")
+		}
+	})
+}
+
 func TestIsRepoAllowed(t *testing.T) {
 	t.Run("nil allowlist permits all repos", func(t *testing.T) {
 		if !isRepoAllowed("any/repo", nil) {
@@ -113,6 +135,67 @@ func TestIsRepoAllowed(t *testing.T) {
 			t.Error("isRepoAllowed() should return false when allowlist is empty")
 		}
 	})
+}
+
+func TestCreateGHAEnabledPoppitCommand(t *testing.T) {
+	metadata := &PRMetadata{
+		PRNumber:   42,
+		Repository: "its-the-vibe/VibeMerge",
+		PRUrl:      "https://github.com/its-the-vibe/VibeMerge/pull/42",
+		Branch:     "feature/my-branch",
+	}
+	config := Config{
+		BaseDir:       "/app/repos",
+		RedisListName: "poppit-commands",
+	}
+	channel := "C123"
+	timestamp := "1234567890.123456"
+
+	cmd := createGHAEnabledPoppitCommand(metadata, config, channel, timestamp)
+
+	if cmd.Repo != metadata.Repository {
+		t.Errorf("Repo = %q, want %q", cmd.Repo, metadata.Repository)
+	}
+	if cmd.Branch != metadata.Branch {
+		t.Errorf("Branch = %q, want %q", cmd.Branch, metadata.Branch)
+	}
+	if cmd.Type != VibeDeployType {
+		t.Errorf("Type = %q, want %q", cmd.Type, VibeDeployType)
+	}
+	if cmd.Dir != "/app/repos/its-the-vibe/VibeMerge" {
+		t.Errorf("Dir = %q, want %q", cmd.Dir, "/app/repos/its-the-vibe/VibeMerge")
+	}
+
+	expectedCommands := []string{
+		"git fetch",
+		"git checkout feature/my-branch",
+		"../vibebox/docker-override/docker-override create --override-tag feature",
+		"gh label create \"feature\" --color \"f107a3\" --force --repo its-the-vibe/VibeMerge",
+		"gh pr edit --add-label \"feature\" https://github.com/its-the-vibe/VibeMerge/pull/42",
+	}
+
+	if len(cmd.Commands) != len(expectedCommands) {
+		t.Fatalf("Commands length = %d, want %d", len(cmd.Commands), len(expectedCommands))
+	}
+
+	for i, expected := range expectedCommands {
+		if cmd.Commands[i] != expected {
+			t.Errorf("Command[%d] = %q, want %q", i, cmd.Commands[i], expected)
+		}
+	}
+
+	if cmd.Metadata == nil {
+		t.Fatal("Metadata should not be nil")
+	}
+	if cmd.Metadata.Channel != channel {
+		t.Errorf("Metadata.Channel = %q, want %q", cmd.Metadata.Channel, channel)
+	}
+	if cmd.Metadata.Ts != timestamp {
+		t.Errorf("Metadata.Ts = %q, want %q", cmd.Metadata.Ts, timestamp)
+	}
+	if cmd.Metadata.TriggerReaction != RocketReaction {
+		t.Errorf("Metadata.TriggerReaction = %q, want %q", cmd.Metadata.TriggerReaction, RocketReaction)
+	}
 }
 
 func TestCreatePoppitCommand(t *testing.T) {
@@ -195,6 +278,77 @@ func TestCreateMainBranchPoppitCommand(t *testing.T) {
 	if cmd.Metadata.TriggerReaction != ClassicalBuildingReaction {
 		t.Errorf("Metadata.TriggerReaction = %q, want %q", cmd.Metadata.TriggerReaction, ClassicalBuildingReaction)
 	}
+}
+
+func TestLoadLegacyDockerApps(t *testing.T) {
+	t.Run("empty config path returns nil", func(t *testing.T) {
+		apps, err := loadLegacyDockerApps("")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if apps != nil {
+			t.Error("expected nil legacyApps for empty config path")
+		}
+	})
+
+	t.Run("non-existent file returns nil", func(t *testing.T) {
+		apps, err := loadLegacyDockerApps("/tmp/nonexistent-vibedeploy-legacy-test.yml")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if apps != nil {
+			t.Error("expected nil legacyApps for missing config file")
+		}
+	})
+
+	t.Run("valid yaml file is loaded correctly", func(t *testing.T) {
+		f, err := os.CreateTemp("", "legacy-apps-*.yml")
+		if err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+		defer os.Remove(f.Name())
+
+		content := "legacyDockerApps:\n  - its-the-vibe/OldApp1\n  - its-the-vibe/OldApp2\n"
+		if _, err := f.WriteString(content); err != nil {
+			t.Fatalf("failed to write temp file: %v", err)
+		}
+		f.Close()
+
+		apps, err := loadLegacyDockerApps(f.Name())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if apps == nil {
+			t.Fatal("expected non-nil legacyApps")
+		}
+		if !apps["its-the-vibe/OldApp1"] {
+			t.Error("expected its-the-vibe/OldApp1 to be a legacy app")
+		}
+		if !apps["its-the-vibe/OldApp2"] {
+			t.Error("expected its-the-vibe/OldApp2 to be a legacy app")
+		}
+		if apps["its-the-vibe/NewApp"] {
+			t.Error("expected its-the-vibe/NewApp not to be a legacy app")
+		}
+	})
+
+	t.Run("invalid yaml returns error", func(t *testing.T) {
+		f, err := os.CreateTemp("", "bad-legacy-yaml-*.yml")
+		if err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+		defer os.Remove(f.Name())
+
+		if _, err := f.WriteString(": invalid: yaml: [\n"); err != nil {
+			t.Fatalf("failed to write temp file: %v", err)
+		}
+		f.Close()
+
+		_, err = loadLegacyDockerApps(f.Name())
+		if err == nil {
+			t.Error("expected error for invalid YAML, got nil")
+		}
+	})
 }
 
 func TestLoadAllowedRepos(t *testing.T) {

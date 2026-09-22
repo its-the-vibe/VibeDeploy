@@ -1,0 +1,9 @@
+# Configuration file for legacy Docker applications
+# Repositories listed here will use the legacy deployment pattern (docker compose build / up).
+# Repositories NOT listed here will follow the GitHub Actions (GHA) feature branch deployment workflow.
+
+legacyDockerApps:
+  - its-the-vibe/OldApp1
+  - its-the-vibe/OldApp2
+  # Add more legacy Docker apps here as needed
+  # Format: owner/repository-name
