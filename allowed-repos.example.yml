@@ -8,3 +8,9 @@ allowed_repos:
   - its-the-vibe/Poppit
   # Add more repositories here as needed
   # Format: owner/repository-name
+
+legacyDockerApps:
+  - its-the-vibe/OldApp1
+  - its-the-vibe/OldApp2
+  # Add more legacy Docker apps here as needed
+  # Format: owner/repository-name
