@@ -32,8 +32,9 @@ Configuration is done via environment variables:
 - `REDIS_OUTPUT_CHANNEL` - Redis pub/sub channel for command output (default: `poppit:command-output`)
 - `REDIS_REACTION_LIST` - Redis list name for Slack reactions (default: `slack_reactions`)
 - `LOG_LEVEL` - Logging level: `DEBUG`, `INFO`, `WARN`, or `ERROR` (default: `INFO`)
-- `ALLOWED_REPOS_CONFIG` - Path to allowed repositories config file (YAML format, optional)
-- `LEGACY_DOCKER_APPS_CONFIG` - Path to legacy Docker apps config file (YAML format, optional)
+- `VIBEDEPLY_CONFIG` - Path to combined VibeDeploy config file (YAML format, optional)
+- `ALLOWED_REPOS_CONFIG` - Path to allowed repositories config file (deprecated, optional)
+- `LEGACY_DOCKER_APPS_CONFIG` - Path to legacy Docker apps config file (deprecated, optional)
 
 See `.env.example` for a template.
 
@@ -48,42 +49,46 @@ VibeDeploy supports four logging levels:
 
 The default log level is `INFO`, which provides a good balance between visibility and verbosity. Use `DEBUG` for troubleshooting and `ERROR` for production environments where you only want to see failures.
 
-### Repository Filtering
+### Combined Service Configuration
 
-VibeDeploy supports optional repository filtering through an allowlist configuration file. This allows you to control which repositories can be deployed via emoji reactions.
+VibeDeploy uses a single combined YAML configuration file specified by `VIBEDEPLY_CONFIG` (or defaults to `vibeDeployConfig.yml`).
 
 #### Configuration
 
-Set the `ALLOWED_REPOS_CONFIG` environment variable to point to a YAML configuration file:
+Set the `VIBEDEPLY_CONFIG` environment variable to point to your configuration file:
 
 ```bash
-export ALLOWED_REPOS_CONFIG=/path/to/allowed-repos.yml
+export VIBEDEPLY_CONFIG=/path/to/vibeDeployConfig.yml
 ```
 
-#### Behavior
+#### Configuration Options
 
-- **If `ALLOWED_REPOS_CONFIG` is not set**: All repositories are allowed (default behavior)
-- **If the config file doesn't exist**: All repositories are allowed (with a warning logged)
-- **If the config file exists**: Only repositories listed in the file will be deployed
+- `allowedRepos` - Optional list of repositories allowed for deployment. If omitted or empty, all repositories are allowed.
+- `legacyDockerApps` - List of repositories using legacy Docker deployment workflow.
+- `dockerOverride` - Full path to the `docker-override` executable used in GHA-enabled deployments. Defaults to `../vibebox/docker-override/docker-override`.
 
 #### Config File Format
 
-See `allowed-repos.example.yml` for a sample configuration:
+See `vibeDeployConfig.example.yml` for a sample configuration:
 
 ```yaml
-allowed_repos:
+allowedRepos:
   - its-the-vibe/VibeMerge
   - its-the-vibe/VibeDeploy
   - its-the-vibe/Poppit
-```
 
-When a rocket emoji reaction is detected on a message for a repository not in the allowlist, the reaction will be ignored and a log message will be generated.
+legacyDockerApps:
+  - its-the-vibe/OldApp1
+  - its-the-vibe/OldApp2
+
+dockerOverride: /path/to/docker-override
+```
 
 ### Deployment Workflows (GHA vs Legacy Docker)
 
 VibeDeploy supports two deployment patterns for feature branch deployments via the rocket emoji:
 
-1. **Legacy Docker Apps**: Repositories listed under `legacyDockerApps` in the YAML configuration specified by `LEGACY_DOCKER_APPS_CONFIG` use the traditional deployment flow:
+1. **Legacy Docker Apps**: Repositories listed under `legacyDockerApps` in the YAML configuration use the traditional deployment flow:
    - `git fetch origin`
    - `git checkout <branch>`
    - `git pull`
@@ -94,19 +99,9 @@ VibeDeploy supports two deployment patterns for feature branch deployments via t
 2. **GHA-Enabled Projects**: Repositories NOT listed in `legacyDockerApps` default to the GitHub Actions workflow:
    - `git fetch`
    - `git checkout <branch>`
-   - `../vibebox/docker-override/docker-override create --override-tag feature`
+   - `<dockerOverride> create --override-tag feature`
    - `gh label create "feature" --color "f107a3" --force --repo <repo>`
    - `gh pr edit --add-label "feature" <pr_url>`
-
-#### Configuration File Format
-
-See `legacy-docker-apps.example.yml` for a sample configuration:
-
-```yaml
-legacyDockerApps:
-  - its-the-vibe/OldApp1
-  - its-the-vibe/OldApp2
-```
 
 ## Building
 

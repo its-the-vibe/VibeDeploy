@@ -34,8 +34,9 @@ go tool cover -html=coverage.out
 - `getEnv` – environment variable lookup with defaults
 - `isRepoAllowed` – repository allowlist enforcement
 - `createPoppitCommand` – Poppit command generation for feature branches
+- `createGHAEnabledPoppitCommand` – Poppit command generation with `dockerOverride` template injection
 - `createMainBranchPoppitCommand` – Poppit command generation for the main branch
-- `loadAllowedRepos` – loading the allowed repositories YAML config
+- `loadVibeDeployConfig` – combined YAML config loading, legacy fallback, and defaults
 
 ## Prerequisites
 

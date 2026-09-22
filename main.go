@@ -25,8 +25,17 @@ type Config struct {
 	RedisOutputChannel     string
 	RedisReactionList      string
 	LogLevel               LogLevel
+	VibeDeployConfig       string
 	AllowedReposConfig     string
 	LegacyDockerAppsConfig string
+	DockerOverride         string
+}
+
+type VibeDeployYamlConfig struct {
+	AllowedRepos     []string `yaml:"allowedRepos"`
+	AllowedReposAlt  []string `yaml:"allowed_repos"`
+	LegacyDockerApps []string `yaml:"legacyDockerApps"`
+	DockerOverride   string   `yaml:"dockerOverride"`
 }
 
 const RocketReaction = "rocket"
@@ -34,6 +43,8 @@ const GearReaction = "gear"
 const ClassicalBuildingReaction = "classical_building"
 const VibeDeployType = "vibe-deploy"
 const DeploymentCommand = "docker compose up -d"
+const DefaultDockerOverride = "../vibebox/docker-override/docker-override"
+const DockerOverrideCommandTemplate = "[dockerOverride] create --override-tag feature"
 
 // LogLevel represents the severity of a log message
 type LogLevel int
@@ -175,15 +186,16 @@ type SlackReaction struct {
 func loadConfig() Config {
 	logLevel := parseLogLevel(getEnv("LOG_LEVEL", "INFO"))
 	return Config{
-		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
-		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
-		SlackToken:         getEnv("SLACK_BOT_TOKEN", ""),
-		BaseDir:            getEnv("BASE_DIR", "/app/repos"),
-		RedisPubSub:        getEnv("REDIS_PUBSUB_CHANNEL", "slack-relay-reaction-added"),
-		RedisListName:      getEnv("REDIS_LIST_NAME", "poppit-commands"),
-		RedisOutputChannel: getEnv("REDIS_OUTPUT_CHANNEL", "poppit:command-output"),
-		RedisReactionList:  getEnv("REDIS_REACTION_LIST", "slack_reactions"),
+		RedisAddr:              getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword:          getEnv("REDIS_PASSWORD", ""),
+		SlackToken:             getEnv("SLACK_BOT_TOKEN", ""),
+		BaseDir:                getEnv("BASE_DIR", "/app/repos"),
+		RedisPubSub:            getEnv("REDIS_PUBSUB_CHANNEL", "slack-relay-reaction-added"),
+		RedisListName:          getEnv("REDIS_LIST_NAME", "poppit-commands"),
+		RedisOutputChannel:     getEnv("REDIS_OUTPUT_CHANNEL", "poppit:command-output"),
+		RedisReactionList:      getEnv("REDIS_REACTION_LIST", "slack_reactions"),
 		LogLevel:               logLevel,
+		VibeDeployConfig:       getEnv("VIBEDEPLY_CONFIG", ""),
 		AllowedReposConfig:     getEnv("ALLOWED_REPOS_CONFIG", ""),
 		LegacyDockerAppsConfig: getEnv("LEGACY_DOCKER_APPS_CONFIG", ""),
 	}
@@ -196,77 +208,191 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// loadAllowedRepos loads the list of allowed repositories from the config file
-// Returns (nil, nil) if no config file is specified or if the file doesn't exist (allow all repos)
+// loadVibeDeployYamlConfig loads the combined configuration from YAML
+func loadVibeDeployYamlConfig(configPath string) (*VibeDeployYamlConfig, error) {
+	if configPath == "" {
+		return nil, nil
+	}
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read vibe deploy config: %w", err)
+	}
+
+	var yamlConfig VibeDeployYamlConfig
+	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse vibe deploy config: %w", err)
+	}
+
+	if len(yamlConfig.AllowedRepos) == 0 && len(yamlConfig.AllowedReposAlt) > 0 {
+		yamlConfig.AllowedRepos = yamlConfig.AllowedReposAlt
+	}
+
+	return &yamlConfig, nil
+}
+
+// loadVibeDeployConfig loads configuration from either the combined VIBEDEPLY_CONFIG file
+// or falls back to legacy separate configuration files.
+func loadVibeDeployConfig(config Config) (map[string]bool, map[string]bool, string, error) {
+	dockerOverride := DefaultDockerOverride
+
+	// 1. Try VIBEDEPLY_CONFIG first
+	if config.VibeDeployConfig != "" {
+		if _, err := os.Stat(config.VibeDeployConfig); err == nil {
+			yamlConfig, err := loadVibeDeployYamlConfig(config.VibeDeployConfig)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			if yamlConfig != nil {
+				var allowedRepos map[string]bool
+				if yamlConfig.AllowedRepos != nil {
+					allowedRepos = make(map[string]bool)
+					for _, repo := range yamlConfig.AllowedRepos {
+						allowedRepos[repo] = true
+					}
+				}
+
+				var legacyApps map[string]bool
+				if yamlConfig.LegacyDockerApps != nil {
+					legacyApps = make(map[string]bool)
+					for _, repo := range yamlConfig.LegacyDockerApps {
+						legacyApps[repo] = true
+					}
+				}
+
+				if yamlConfig.DockerOverride != "" {
+					dockerOverride = yamlConfig.DockerOverride
+				}
+
+				logInfo("Loaded combined VibeDeploy config from %s (%d allowed repos, %d legacy docker apps, dockerOverride: %s)",
+					config.VibeDeployConfig, len(allowedRepos), len(legacyApps), dockerOverride)
+				return allowedRepos, legacyApps, dockerOverride, nil
+			}
+		} else if !os.IsNotExist(err) {
+			return nil, nil, "", fmt.Errorf("error checking vibe deploy config file: %w", err)
+		} else {
+			logWarn("VibeDeploy config file not found at %s", config.VibeDeployConfig)
+		}
+	}
+
+	// 2. Check for default vibeDeployConfig.yml if no legacy config environment variables are set
+	defaultConfigPath := "vibeDeployConfig.yml"
+	if config.VibeDeployConfig == "" && config.AllowedReposConfig == "" && config.LegacyDockerAppsConfig == "" {
+		if _, err := os.Stat(defaultConfigPath); err == nil {
+			yamlConfig, err := loadVibeDeployYamlConfig(defaultConfigPath)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			if yamlConfig != nil {
+				var allowedRepos map[string]bool
+				if yamlConfig.AllowedRepos != nil {
+					allowedRepos = make(map[string]bool)
+					for _, repo := range yamlConfig.AllowedRepos {
+						allowedRepos[repo] = true
+					}
+				}
+
+				var legacyApps map[string]bool
+				if yamlConfig.LegacyDockerApps != nil {
+					legacyApps = make(map[string]bool)
+					for _, repo := range yamlConfig.LegacyDockerApps {
+						legacyApps[repo] = true
+					}
+				}
+
+				if yamlConfig.DockerOverride != "" {
+					dockerOverride = yamlConfig.DockerOverride
+				}
+
+				logInfo("Loaded combined VibeDeploy config from default file %s (%d allowed repos, %d legacy docker apps, dockerOverride: %s)",
+					defaultConfigPath, len(allowedRepos), len(legacyApps), dockerOverride)
+				return allowedRepos, legacyApps, dockerOverride, nil
+			}
+		}
+	}
+
+	// 3. Fallback to legacy separate configs if specified
+	if config.AllowedReposConfig != "" || config.LegacyDockerAppsConfig != "" {
+		logWarn("DEPRECATION NOTICE: Using legacy configuration files (ALLOWED_REPOS_CONFIG / LEGACY_DOCKER_APPS_CONFIG). Please migrate to VIBEDEPLY_CONFIG.")
+		allowedRepos, err := loadAllowedRepos(config.AllowedReposConfig)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to load legacy allowed repos config: %w", err)
+		}
+		legacyApps, err := loadLegacyDockerApps(config.LegacyDockerAppsConfig)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to load legacy docker apps config: %w", err)
+		}
+		return allowedRepos, legacyApps, dockerOverride, nil
+	}
+
+	// Default when no config file specified or found
+	logInfo("No configuration file found or specified, using defaults")
+	return nil, nil, dockerOverride, nil
+}
+
+// loadAllowedRepos loads the list of allowed repositories from the legacy config file
 func loadAllowedRepos(configPath string) (map[string]bool, error) {
-	// If no config path specified, allow all repos
 	if configPath == "" {
 		logInfo("No allowed repos config specified, allowing all repositories")
 		return nil, nil
 	}
 
-	// Check if file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		logInfo("Allowed repos config file not found at %s, allowing all repositories", configPath)
 		return nil, nil
 	}
 
-	// Read the config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read allowed repos config: %w", err)
 	}
 
-	// Parse YAML
 	var config AllowedReposConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse allowed repos config: %w", err)
 	}
 
-	// Convert to map for faster lookup
 	allowedRepos := make(map[string]bool)
 	for _, repo := range config.AllowedRepos {
 		allowedRepos[repo] = true
 	}
 
-	logInfo("Loaded %d allowed repositories from config", len(allowedRepos))
+	logInfo("Loaded %d allowed repositories from legacy config", len(allowedRepos))
 	return allowedRepos, nil
 }
 
-// loadLegacyDockerApps loads the list of legacy Docker applications from the config file
-// Returns (nil, nil) if no config file is specified or if the file doesn't exist (no legacy apps)
+// loadLegacyDockerApps loads the list of legacy Docker applications from the legacy config file
 func loadLegacyDockerApps(configPath string) (map[string]bool, error) {
-	// If no config path specified, no repos are legacy docker apps
 	if configPath == "" {
 		logInfo("No legacy docker apps config specified, treating all repos as GHA-enabled")
 		return nil, nil
 	}
 
-	// Check if file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		logInfo("Legacy docker apps config file not found at %s, treating all repos as GHA-enabled", configPath)
 		return nil, nil
 	}
 
-	// Read the config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read legacy docker apps config: %w", err)
 	}
 
-	// Parse YAML
 	var config LegacyDockerAppsConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse legacy docker apps config: %w", err)
 	}
 
-	// Convert to map for faster lookup
 	legacyApps := make(map[string]bool)
 	for _, repo := range config.LegacyDockerApps {
 		legacyApps[repo] = true
 	}
 
-	logInfo("Loaded %d legacy docker apps from config", len(legacyApps))
+	logInfo("Loaded %d legacy docker apps from legacy config", len(legacyApps))
 	return legacyApps, nil
 }
 
@@ -300,17 +426,12 @@ func main() {
 		log.Fatal("SLACK_BOT_TOKEN environment variable is required")
 	}
 
-	// Load allowed repos configuration
-	allowedRepos, err := loadAllowedRepos(config.AllowedReposConfig)
+	// Load configuration
+	allowedRepos, legacyApps, dockerOverride, err := loadVibeDeployConfig(config)
 	if err != nil {
-		log.Fatalf("Failed to load allowed repos configuration: %v", err)
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
-
-	// Load legacy docker apps configuration
-	legacyApps, err := loadLegacyDockerApps(config.LegacyDockerAppsConfig)
-	if err != nil {
-		log.Fatalf("Failed to load legacy docker apps configuration: %v", err)
-	}
+	config.DockerOverride = dockerOverride
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -518,6 +639,13 @@ func createPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp
 func createGHAEnabledPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp string) PoppitCommand {
 	dir := fmt.Sprintf("%s/%s", config.BaseDir, metadata.Repository)
 
+	dockerOverridePath := config.DockerOverride
+	if dockerOverridePath == "" {
+		dockerOverridePath = DefaultDockerOverride
+	}
+
+	dockerOverrideCmd := strings.ReplaceAll(DockerOverrideCommandTemplate, "[dockerOverride]", dockerOverridePath)
+
 	return PoppitCommand{
 		Repo:   metadata.Repository,
 		Branch: metadata.Branch,
@@ -526,7 +654,7 @@ func createGHAEnabledPoppitCommand(metadata *PRMetadata, config Config, channel,
 		Commands: []string{
 			"git fetch",
 			fmt.Sprintf("git checkout %s", metadata.Branch),
-			"../vibebox/docker-override/docker-override create --override-tag feature",
+			dockerOverrideCmd,
 			fmt.Sprintf("gh label create \"feature\" --color \"f107a3\" --force --repo %s", metadata.Repository),
 			fmt.Sprintf("gh pr edit --add-label \"feature\" %s", metadata.PRUrl),
 		},

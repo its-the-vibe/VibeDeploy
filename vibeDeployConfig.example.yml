@@ -1,0 +1,10 @@
+allowedRepos:
+  - its-the-vibe/VibeMerge
+  - its-the-vibe/VibeDeploy
+  - its-the-vibe/Poppit
+
+legacyDockerApps:
+  - its-the-vibe/OldApp1
+  - its-the-vibe/OldApp2
+
+dockerOverride: /path/to/docker-override
