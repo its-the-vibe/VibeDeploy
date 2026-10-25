@@ -13,7 +13,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source code
-COPY *.go ./
+COPY . .
 
 # Build the binary with static linking
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -installsuffix cgo -ldflags '-extldflags "-static"' -o vibedeploy .
