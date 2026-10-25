@@ -3,6 +3,26 @@ package main
 import (
 	"os"
 	"testing"
+
+	appconfig "github.com/its-the-vibe/VibeDeploy/internal/config"
+	"github.com/its-the-vibe/VibeDeploy/internal/deployment"
+	"github.com/its-the-vibe/VibeDeploy/internal/domain"
+)
+
+type Config = appconfig.Config
+type LogLevel = appconfig.LogLevel
+type PRMetadata = domain.PRMetadata
+
+const (
+	DEBUG                     = appconfig.DEBUG
+	INFO                      = appconfig.INFO
+	WARN                      = appconfig.WARN
+	ERROR                     = appconfig.ERROR
+	DefaultConfigFile         = appconfig.DefaultConfigFile
+	DefaultDockerOverride     = appconfig.DefaultDockerOverride
+	RocketReaction            = domain.RocketReaction
+	ClassicalBuildingReaction = domain.ClassicalBuildingReaction
+	VibeDeployType            = domain.VibeDeployType
 )
 
 func TestLogLevelString(t *testing.T) {
@@ -47,7 +67,7 @@ func TestParseLogLevel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := parseLogLevel(tt.input)
+			got := appconfig.ParseLogLevel(tt.input)
 			if got != tt.expected {
 				t.Errorf("parseLogLevel(%q) = %v, want %v", tt.input, got, tt.expected)
 			}
@@ -60,7 +80,7 @@ func TestGetEnv(t *testing.T) {
 		os.Setenv("TEST_VAR_VIBEDEPLOY", "testvalue")
 		defer os.Unsetenv("TEST_VAR_VIBEDEPLOY")
 
-		got := getEnv("TEST_VAR_VIBEDEPLOY", "default")
+		got := appconfig.GetEnv("TEST_VAR_VIBEDEPLOY", "default")
 		if got != "testvalue" {
 			t.Errorf("getEnv() = %q, want %q", got, "testvalue")
 		}
@@ -69,7 +89,7 @@ func TestGetEnv(t *testing.T) {
 	t.Run("returns default when env var not set", func(t *testing.T) {
 		os.Unsetenv("TEST_VAR_VIBEDEPLOY_MISSING")
 
-		got := getEnv("TEST_VAR_VIBEDEPLOY_MISSING", "mydefault")
+		got := appconfig.GetEnv("TEST_VAR_VIBEDEPLOY_MISSING", "mydefault")
 		if got != "mydefault" {
 			t.Errorf("getEnv() = %q, want %q", got, "mydefault")
 		}
@@ -79,7 +99,7 @@ func TestGetEnv(t *testing.T) {
 		os.Setenv("TEST_VAR_VIBEDEPLOY_EMPTY", "")
 		defer os.Unsetenv("TEST_VAR_VIBEDEPLOY_EMPTY")
 
-		got := getEnv("TEST_VAR_VIBEDEPLOY_EMPTY", "fallback")
+		got := appconfig.GetEnv("TEST_VAR_VIBEDEPLOY_EMPTY", "fallback")
 		if got != "fallback" {
 			t.Errorf("getEnv() = %q, want %q", got, "fallback")
 		}
@@ -88,21 +108,21 @@ func TestGetEnv(t *testing.T) {
 
 func TestIsLegacyDockerApp(t *testing.T) {
 	t.Run("nil legacyApps returns false", func(t *testing.T) {
-		if isLegacyDockerApp("any/repo", nil) {
+		if deployment.IsLegacyDockerApp("any/repo", nil) {
 			t.Error("isLegacyDockerApp() should return false when legacyApps is nil")
 		}
 	})
 
 	t.Run("repo in legacyApps is identified as legacy", func(t *testing.T) {
 		legacy := map[string]bool{"its-the-vibe/OldApp": true}
-		if !isLegacyDockerApp("its-the-vibe/OldApp", legacy) {
+		if !deployment.IsLegacyDockerApp("its-the-vibe/OldApp", legacy) {
 			t.Error("isLegacyDockerApp() should return true for a listed legacy repo")
 		}
 	})
 
 	t.Run("repo not in legacyApps is not legacy", func(t *testing.T) {
 		legacy := map[string]bool{"its-the-vibe/OldApp": true}
-		if isLegacyDockerApp("its-the-vibe/NewApp", legacy) {
+		if deployment.IsLegacyDockerApp("its-the-vibe/NewApp", legacy) {
 			t.Error("isLegacyDockerApp() should return false for an unlisted repo")
 		}
 	})
@@ -110,28 +130,28 @@ func TestIsLegacyDockerApp(t *testing.T) {
 
 func TestIsRepoAllowed(t *testing.T) {
 	t.Run("nil allowlist permits all repos", func(t *testing.T) {
-		if !isRepoAllowed("any/repo", nil) {
+		if !deployment.IsRepoAllowed("any/repo", nil) {
 			t.Error("isRepoAllowed() should return true when allowedRepos is nil")
 		}
 	})
 
 	t.Run("repo in allowlist is permitted", func(t *testing.T) {
 		allowed := map[string]bool{"its-the-vibe/VibeMerge": true}
-		if !isRepoAllowed("its-the-vibe/VibeMerge", allowed) {
+		if !deployment.IsRepoAllowed("its-the-vibe/VibeMerge", allowed) {
 			t.Error("isRepoAllowed() should return true for a listed repo")
 		}
 	})
 
 	t.Run("repo not in allowlist is denied", func(t *testing.T) {
 		allowed := map[string]bool{"its-the-vibe/VibeMerge": true}
-		if isRepoAllowed("its-the-vibe/Other", allowed) {
+		if deployment.IsRepoAllowed("its-the-vibe/Other", allowed) {
 			t.Error("isRepoAllowed() should return false for an unlisted repo")
 		}
 	})
 
 	t.Run("empty allowlist denies all repos", func(t *testing.T) {
 		allowed := map[string]bool{}
-		if isRepoAllowed("its-the-vibe/VibeMerge", allowed) {
+		if deployment.IsRepoAllowed("its-the-vibe/VibeMerge", allowed) {
 			t.Error("isRepoAllowed() should return false when allowlist is empty")
 		}
 	})
@@ -152,7 +172,7 @@ func TestCreateGHAEnabledPoppitCommand(t *testing.T) {
 		channel := "C123"
 		timestamp := "1234567890.123456"
 
-		cmd := createGHAEnabledPoppitCommand(metadata, config, channel, timestamp)
+		cmd := deployment.CreateGHAEnabledPoppitCommand(metadata, config, channel, timestamp)
 
 		expectedCommands := []string{
 			"git fetch",
@@ -188,7 +208,7 @@ func TestCreateGHAEnabledPoppitCommand(t *testing.T) {
 		channel := "C123"
 		timestamp := "1234567890.123456"
 
-		cmd := createGHAEnabledPoppitCommand(metadata, config, channel, timestamp)
+		cmd := deployment.CreateGHAEnabledPoppitCommand(metadata, config, channel, timestamp)
 
 		expectedOverrideCmd := "/custom/bin/docker-override create --override-tag feature"
 		if cmd.Commands[2] != expectedOverrideCmd {
@@ -210,7 +230,7 @@ func TestCreatePoppitCommand(t *testing.T) {
 	channel := "C123"
 	timestamp := "1234567890.123456"
 
-	cmd := createPoppitCommand(metadata, config, channel, timestamp)
+	cmd := deployment.CreatePoppitCommand(metadata, config, channel, timestamp)
 
 	if cmd.Repo != metadata.Repository {
 		t.Errorf("Repo = %q, want %q", cmd.Repo, metadata.Repository)
@@ -254,7 +274,7 @@ func TestCreateMainBranchPoppitCommand(t *testing.T) {
 	channel := "C456"
 	timestamp := "9999999999.000001"
 
-	cmd := createMainBranchPoppitCommand(metadata, config, channel, timestamp)
+	cmd := deployment.CreateMainBranchPoppitCommand(metadata, config, channel, timestamp)
 
 	if cmd.Repo != metadata.Repository {
 		t.Errorf("Repo = %q, want %q", cmd.Repo, metadata.Repository)
@@ -304,7 +324,7 @@ docker_override: /opt/bin/docker-override
 			t.Fatalf("failed to write config file: %v", err)
 		}
 
-		config, err := loadConfigFromFile(configFile)
+		config, err := appconfig.LoadFromFile(configFile)
 		if err != nil {
 			t.Fatalf("unexpected error loading config: %v", err)
 		}
@@ -330,7 +350,7 @@ docker_override: /opt/bin/docker-override
 	})
 
 	t.Run("uses defaults when config file is missing", func(t *testing.T) {
-		config, err := loadConfigFromFile(t.TempDir() + "/missing.yaml")
+		config, err := appconfig.LoadFromFile(t.TempDir() + "/missing.yaml")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -354,7 +374,7 @@ docker_override: /opt/bin/docker-override
 		if err := os.WriteFile(configFile, []byte(": invalid: yaml: [\n"), 0600); err != nil {
 			t.Fatalf("failed to write config file: %v", err)
 		}
-		if _, err := loadConfigFromFile(configFile); err == nil {
+		if _, err := appconfig.LoadFromFile(configFile); err == nil {
 			t.Error("expected error for invalid YAML, got nil")
 		}
 	})
@@ -370,7 +390,7 @@ func TestLoadConfigUsesConfigFileEnvironmentVariable(t *testing.T) {
 	}
 	t.Setenv("CONFIG_FILE", configFile)
 
-	config, err := loadConfig()
+	config, err := appconfig.Load()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -389,7 +409,7 @@ func TestLoadConfigDefaultsToConfigYaml(t *testing.T) {
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
-	config, err := loadConfig()
+	config, err := appconfig.Load()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
