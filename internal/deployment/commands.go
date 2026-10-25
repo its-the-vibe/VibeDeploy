@@ -62,6 +62,9 @@ func CreateGHAEnabledPoppitCommand(metadata *domain.PRMetadata, cfg config.Confi
 			fmt.Sprintf("git checkout %s", metadata.Branch),
 			dockerOverrideCmd,
 			fmt.Sprintf("gh label create \"feature\" --color \"f107a3\" --force --repo %s", metadata.Repository),
+			// idempotently remove label "feature", useful if we want to retrigger a workflow run
+			fmt.Sprintf("gh pr edit --remove-label \"feature\" %s", metadata.PRUrl),
+			"sleep 5",
 			fmt.Sprintf("gh pr edit --add-label \"feature\" %s", metadata.PRUrl),
 		},
 		Metadata: commandMetadata(channel, timestamp, domain.RocketReaction),
