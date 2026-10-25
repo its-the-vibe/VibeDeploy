@@ -279,113 +279,99 @@ func TestCreateMainBranchPoppitCommand(t *testing.T) {
 	}
 }
 
-func TestLoadVibeDeployConfig(t *testing.T) {
-	t.Run("loads combined config file correctly", func(t *testing.T) {
-		f, err := os.CreateTemp("", "vibe-config-*.yml")
-		if err != nil {
-			t.Fatalf("failed to create temp file: %v", err)
-		}
-		defer os.Remove(f.Name())
+func TestLoadConfigFromFile(t *testing.T) {
+	t.Setenv("REDIS_PASSWORD", "")
+	t.Setenv("SLACK_BOT_TOKEN", "")
 
+	t.Run("loads configuration values from YAML", func(t *testing.T) {
+		configFile := t.TempDir() + "/config.yaml"
 		content := `
-allowedRepos:
+redis:
+  addr: redis.internal:6379
+  pubsub_channel: test-events
+  list_name: test-commands
+  output_channel: test-output
+  reaction_list: test-reactions
+base_dir: /srv/repos
+log_level: debug
+allowed_repos:
   - its-the-vibe/VibeMerge
-  - its-the-vibe/Poppit
-
-legacyDockerApps:
-  - its-the-vibe/OldApp1
-
-dockerOverride: /opt/bin/docker-override
+legacy_docker_apps:
+  - its-the-vibe/OldApp
+docker_override: /opt/bin/docker-override
 `
-		if _, err := f.WriteString(content); err != nil {
-			t.Fatalf("failed to write temp file: %v", err)
-		}
-		f.Close()
-
-		cfg := Config{
-			VibeDeployConfig: f.Name(),
+		if err := os.WriteFile(configFile, []byte(content), 0600); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
 		}
 
-		allowed, legacy, override, err := loadVibeDeployConfig(cfg)
+		config, err := loadConfigFromFile(configFile)
 		if err != nil {
 			t.Fatalf("unexpected error loading config: %v", err)
 		}
-
-		if !allowed["its-the-vibe/VibeMerge"] || !allowed["its-the-vibe/Poppit"] {
-			t.Errorf("allowedRepos missing expected values: %v", allowed)
+		if config.RedisAddr != "redis.internal:6379" ||
+			config.RedisPubSub != "test-events" ||
+			config.RedisListName != "test-commands" ||
+			config.RedisOutputChannel != "test-output" ||
+			config.RedisReactionList != "test-reactions" ||
+			config.BaseDir != "/srv/repos" ||
+			config.LogLevel != DEBUG ||
+			config.DockerOverride != "/opt/bin/docker-override" {
+			t.Errorf("unexpected config values: %+v", config)
 		}
-		if !legacy["its-the-vibe/OldApp1"] {
-			t.Errorf("legacyApps missing expected values: %v", legacy)
+		if !config.AllowedRepos["its-the-vibe/VibeMerge"] {
+			t.Errorf("allowed repos missing expected value: %v", config.AllowedRepos)
 		}
-		if override != "/opt/bin/docker-override" {
-			t.Errorf("dockerOverride = %q, want %q", override, "/opt/bin/docker-override")
+		if !config.LegacyDockerApps["its-the-vibe/OldApp"] {
+			t.Errorf("legacy apps missing expected value: %v", config.LegacyDockerApps)
 		}
 	})
 
-	t.Run("falls back to default dockerOverride path if not specified in YAML", func(t *testing.T) {
-		f, err := os.CreateTemp("", "vibe-config-*.yml")
-		if err != nil {
-			t.Fatalf("failed to create temp file: %v", err)
-		}
-		defer os.Remove(f.Name())
-
-		content := `
-allowedRepos:
-  - its-the-vibe/VibeMerge
-`
-		if _, err := f.WriteString(content); err != nil {
-			t.Fatalf("failed to write temp file: %v", err)
-		}
-		f.Close()
-
-		cfg := Config{
-			VibeDeployConfig: f.Name(),
-		}
-
-		_, _, override, err := loadVibeDeployConfig(cfg)
+	t.Run("uses defaults when config file is missing", func(t *testing.T) {
+		config, err := loadConfigFromFile(t.TempDir() + "/missing.yaml")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-
-		if override != DefaultDockerOverride {
-			t.Errorf("dockerOverride = %q, want default %q", override, DefaultDockerOverride)
+		if config.RedisAddr != "localhost:6379" ||
+			config.RedisPubSub != "slack-relay-reaction-added" ||
+			config.RedisListName != "poppit-commands" ||
+			config.RedisOutputChannel != "poppit:command-output" ||
+			config.RedisReactionList != "slack_reactions" ||
+			config.BaseDir != "/app/repos" ||
+			config.LogLevel != INFO ||
+			config.DockerOverride != DefaultDockerOverride {
+			t.Errorf("unexpected defaults: %+v", config)
+		}
+		if config.AllowedRepos != nil || config.LegacyDockerApps != nil {
+			t.Errorf("expected nil repo lists by default, got allowed=%v legacy=%v", config.AllowedRepos, config.LegacyDockerApps)
 		}
 	})
 
-	t.Run("returns defaults when no config file specified or present", func(t *testing.T) {
-		cfg := Config{}
-		allowed, legacy, override, err := loadVibeDeployConfig(cfg)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	t.Run("returns error for invalid YAML", func(t *testing.T) {
+		configFile := t.TempDir() + "/invalid.yaml"
+		if err := os.WriteFile(configFile, []byte(": invalid: yaml: [\n"), 0600); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
 		}
-		if allowed != nil {
-			t.Errorf("expected nil allowed repos")
-		}
-		if legacy != nil {
-			t.Errorf("expected nil legacy apps")
-		}
-		if override != DefaultDockerOverride {
-			t.Errorf("expected default docker override path")
+		if _, err := loadConfigFromFile(configFile); err == nil {
+			t.Error("expected error for invalid YAML, got nil")
 		}
 	})
+}
 
-	t.Run("returns error for invalid combined YAML", func(t *testing.T) {
-		f, err := os.CreateTemp("", "bad-vibe-config-*.yml")
-		if err != nil {
-			t.Fatalf("failed to create temp file: %v", err)
-		}
-		defer os.Remove(f.Name())
+func TestLoadConfigUsesConfigFileEnvironmentVariable(t *testing.T) {
+	t.Setenv("REDIS_PASSWORD", "")
+	t.Setenv("SLACK_BOT_TOKEN", "")
+	t.Setenv("REDIS_ADDR", "ignored-env-value")
+	configFile := t.TempDir() + "/custom.yaml"
+	if err := os.WriteFile(configFile, []byte("redis:\n  addr: redis.from-file:6379\n"), 0600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+	t.Setenv("CONFIG_FILE", configFile)
 
-		f.WriteString(": invalid: yaml: [\n")
-		f.Close()
-
-		cfg := Config{
-			VibeDeployConfig: f.Name(),
-		}
-
-		_, _, _, err = loadVibeDeployConfig(cfg)
-		if err == nil {
-			t.Error("expected error for invalid combined YAML, got nil")
-		}
-	})
+	config, err := loadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config.RedisAddr != "redis.from-file:6379" {
+		t.Errorf("RedisAddr = %q, want config file value", config.RedisAddr)
+	}
 }
