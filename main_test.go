@@ -280,8 +280,8 @@ func TestCreateMainBranchPoppitCommand(t *testing.T) {
 }
 
 func TestLoadConfigFromFile(t *testing.T) {
-	t.Setenv("REDIS_PASSWORD", "")
-	t.Setenv("SLACK_BOT_TOKEN", "")
+	t.Setenv("REDIS_PASSWORD", "redis-secret")
+	t.Setenv("SLACK_BOT_TOKEN", "slack-secret")
 
 	t.Run("loads configuration values from YAML", func(t *testing.T) {
 		configFile := t.TempDir() + "/config.yaml"
@@ -317,6 +317,9 @@ docker_override: /opt/bin/docker-override
 			config.LogLevel != DEBUG ||
 			config.DockerOverride != "/opt/bin/docker-override" {
 			t.Errorf("unexpected config values: %+v", config)
+		}
+		if config.RedisPassword != "redis-secret" || config.SlackToken != "slack-secret" {
+			t.Errorf("sensitive settings were not loaded from the environment")
 		}
 		if !config.AllowedRepos["its-the-vibe/VibeMerge"] {
 			t.Errorf("allowed repos missing expected value: %v", config.AllowedRepos)
@@ -373,5 +376,24 @@ func TestLoadConfigUsesConfigFileEnvironmentVariable(t *testing.T) {
 	}
 	if config.RedisAddr != "redis.from-file:6379" {
 		t.Errorf("RedisAddr = %q, want config file value", config.RedisAddr)
+	}
+}
+
+func TestLoadConfigDefaultsToConfigYaml(t *testing.T) {
+	t.Setenv("REDIS_PASSWORD", "")
+	t.Setenv("SLACK_BOT_TOKEN", "")
+	t.Setenv("CONFIG_FILE", "")
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(DefaultConfigFile, []byte("redis:\n  addr: redis.default-file:6379\n"), 0600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	config, err := loadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config.RedisAddr != "redis.default-file:6379" {
+		t.Errorf("RedisAddr = %q, want default config file value", config.RedisAddr)
 	}
 }

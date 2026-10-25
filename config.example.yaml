@@ -1,0 +1,20 @@
+redis:
+  addr: localhost:6379
+  pubsub_channel: slack-relay-reaction-added
+  list_name: poppit-commands
+  output_channel: poppit:command-output
+  reaction_list: slack_reactions
+
+base_dir: /app/repos
+log_level: INFO
+
+allowed_repos:
+  - its-the-vibe/VibeMerge
+  - its-the-vibe/VibeDeploy
+  - its-the-vibe/Poppit
+
+legacy_docker_apps:
+  - its-the-vibe/OldApp1
+  - its-the-vibe/OldApp2
+
+docker_override: ../vibebox/docker-override/docker-override

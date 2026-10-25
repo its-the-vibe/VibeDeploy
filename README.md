@@ -21,20 +21,17 @@ VibeDeploy is a Go service that listens for Slack emoji reactions (specifically 
 
 ## Configuration
 
-Configuration is done via environment variables:
+Sensitive credentials are kept in `.env`; all non-sensitive settings belong in
+`config.yaml`. Copy the provided templates to create local configuration:
 
-- `REDIS_ADDR` - Redis server address (default: `localhost:6379`)
-- `REDIS_PASSWORD` - Redis password (default: empty)
-- `SLACK_BOT_TOKEN` - Slack bot token (required)
-- `BASE_DIR` - Base directory for repositories (default: `/app/repos`)
-- `REDIS_PUBSUB_CHANNEL` - Redis pub/sub channel to subscribe to (default: `slack-relay-reaction-added`)
-- `REDIS_LIST_NAME` - Redis list name for Poppit commands (default: `poppit-commands`)
-- `REDIS_OUTPUT_CHANNEL` - Redis pub/sub channel for command output (default: `poppit:command-output`)
-- `REDIS_REACTION_LIST` - Redis list name for Slack reactions (default: `slack_reactions`)
-- `LOG_LEVEL` - Logging level: `DEBUG`, `INFO`, `WARN`, or `ERROR` (default: `INFO`)
-- `VIBEDEPLY_CONFIG` - Path to combined VibeDeploy config file (YAML format, optional)
+```bash
+cp .env.example .env
+cp config.example.yaml config.yaml
+```
 
-See `.env.example` for a template.
+Set `REDIS_PASSWORD` (if required) and `SLACK_BOT_TOKEN` in `.env`. The
+application loads `config.yaml` from the repository root by default. Set
+`CONFIG_FILE` to override its path.
 
 ### Logging Levels
 
@@ -47,46 +44,36 @@ VibeDeploy supports four logging levels:
 
 The default log level is `INFO`, which provides a good balance between visibility and verbosity. Use `DEBUG` for troubleshooting and `ERROR` for production environments where you only want to see failures.
 
-### Combined Service Configuration
+### YAML Configuration
 
-VibeDeploy uses a single combined YAML configuration file specified by `VIBEDEPLY_CONFIG` (or defaults to `vibeDeployConfig.yml`).
+`config.yaml` supports the following settings and defaults:
 
-#### Configuration
+| Setting | Default |
+| --- | --- |
+| `redis.addr` | `localhost:6379` |
+| `base_dir` | `/app/repos` |
+| `redis.pubsub_channel` | `slack-relay-reaction-added` |
+| `redis.list_name` | `poppit-commands` |
+| `redis.output_channel` | `poppit:command-output` |
+| `redis.reaction_list` | `slack_reactions` |
+| `log_level` | `INFO` |
+| `docker_override` | `../vibebox/docker-override/docker-override` |
 
-Set the `VIBEDEPLY_CONFIG` environment variable to point to your configuration file:
+`allowed_repos` is an optional repository allowlist; if omitted, all repositories
+are allowed. `legacy_docker_apps` lists repositories that use the legacy Docker
+deployment workflow. See `config.example.yaml` for a complete template.
+
+For example, to use a custom configuration file locally:
 
 ```bash
-export VIBEDEPLY_CONFIG=/path/to/vibeDeployConfig.yml
-```
-
-#### Configuration Options
-
-- `allowedRepos` - Optional list of repositories allowed for deployment. If omitted or empty, all repositories are allowed.
-- `legacyDockerApps` - List of repositories using legacy Docker deployment workflow.
-- `dockerOverride` - Full path to the `docker-override` executable used in GHA-enabled deployments. Defaults to `../vibebox/docker-override/docker-override`.
-
-#### Config File Format
-
-See `vibeDeployConfig.example.yml` for a sample configuration:
-
-```yaml
-allowedRepos:
-  - its-the-vibe/VibeMerge
-  - its-the-vibe/VibeDeploy
-  - its-the-vibe/Poppit
-
-legacyDockerApps:
-  - its-the-vibe/OldApp1
-  - its-the-vibe/OldApp2
-
-dockerOverride: /path/to/docker-override
+CONFIG_FILE=/path/to/config.yaml go run .
 ```
 
 ### Deployment Workflows (GHA vs Legacy Docker)
 
 VibeDeploy supports two deployment patterns for feature branch deployments via the rocket emoji:
 
-1. **Legacy Docker Apps**: Repositories listed under `legacyDockerApps` in the YAML configuration use the traditional deployment flow:
+1. **Legacy Docker Apps**: Repositories listed under `legacy_docker_apps` in the YAML configuration use the traditional deployment flow:
    - `git fetch origin`
    - `git checkout <branch>`
    - `git pull`
@@ -94,7 +81,7 @@ VibeDeploy supports two deployment patterns for feature branch deployments via t
    - `docker compose down`
    - `docker compose up -d`
 
-2. **GHA-Enabled Projects**: Repositories NOT listed in `legacyDockerApps` default to the GitHub Actions workflow:
+2. **GHA-Enabled Projects**: Repositories not listed in `legacy_docker_apps` default to the GitHub Actions workflow:
    - `git fetch`
    - `git checkout <branch>`
    - `<dockerOverride> create --override-tag feature`
@@ -144,14 +131,18 @@ make ci
 ### Local Run
 
 ```bash
-export SLACK_BOT_TOKEN=xoxb-your-token
-export REDIS_ADDR=localhost:6379
-./vibedeploy
+cp config.example.yaml config.yaml
+cp .env.example .env
+# Set SLACK_BOT_TOKEN in .env, then:
+source .env
+go run .
 ```
 
 ### Docker Run
 
 ```bash
+# Ensure config.yaml exists and set redis.addr to host.docker.internal:6379
+# when Redis is running on the Docker host.
 docker compose up -d
 ```
 
@@ -271,4 +262,3 @@ VibeDeploy publishes reaction messages to the `slack_reactions` Redis list for S
 - Go 1.24+
 - Redis server (external)
 - Slack Bot Token with appropriate permissions
-

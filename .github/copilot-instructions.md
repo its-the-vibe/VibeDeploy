@@ -16,14 +16,12 @@ VibeDeploy is a Go service that listens for Slack emoji reactions (specifically 
 
 ## Configuration
 
-The service is configured via environment variables:
+Only sensitive credentials are configured via environment variables:
 
-- `REDIS_ADDR` - Redis server address (default: `localhost:6379`)
 - `REDIS_PASSWORD` - Redis password (optional)
 - `SLACK_BOT_TOKEN` - Slack bot token (required)
-- `BASE_DIR` - Base directory for repositories (default: `/app/repos`)
-- `REDIS_PUBSUB_CHANNEL` - Redis pub/sub channel to subscribe to (default: `slack-relay-reaction-added`)
-- `REDIS_LIST_NAME` - Redis list name for Poppit commands (default: `poppit-commands`)
+
+Non-sensitive settings are stored in `config.yaml`, which is loaded from the repository root by default. `CONFIG_FILE` can override the path. See `config.example.yaml` for Redis settings, base directory, logging level, allowed repositories, legacy Docker apps, and Docker override path.
 
 ## Building and Running
 
@@ -36,9 +34,11 @@ go build -o vibedeploy .
 
 Run locally:
 ```bash
-export SLACK_BOT_TOKEN=xoxb-your-token
-export REDIS_ADDR=localhost:6379
-./vibedeploy
+cp .env.example .env
+cp config.example.yaml config.yaml
+# Set SLACK_BOT_TOKEN in .env
+source .env
+go run .
 ```
 
 Or run directly:
@@ -106,9 +106,9 @@ redis-cli PUBLISH slack-relay-reaction-added '{"event":{"type":"reaction_added",
   - `github.com/slack-go/slack` for Slack API
 
 ### Configuration
-- Use environment variables for all configuration
+- Keep only `REDIS_PASSWORD` and `SLACK_BOT_TOKEN` in `.env`; store non-sensitive settings in `config.yaml`
 - Provide sensible defaults where possible
-- Document all configuration options in README.md and `.env.example`
+- Document configuration options in README.md, `.env.example`, and `config.example.yaml`
 - Fail fast if required configuration is missing
 
 ### Data Structures

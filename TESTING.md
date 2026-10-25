@@ -36,7 +36,7 @@ go tool cover -html=coverage.out
 - `createPoppitCommand` – Poppit command generation for feature branches
 - `createGHAEnabledPoppitCommand` – Poppit command generation with `dockerOverride` template injection
 - `createMainBranchPoppitCommand` – Poppit command generation for the main branch
-- `loadVibeDeployConfig` – combined YAML config loading and defaults
+- `loadConfigFromFile` – YAML config loading and defaults
 
 ## Prerequisites
 
@@ -52,11 +52,19 @@ go tool cover -html=coverage.out
 cp .env.example .env
 ```
 
-2. Edit `.env` and set your actual values:
-   - `SLACK_BOT_TOKEN` - Your Slack bot token
-   - `REDIS_ADDR` - Your Redis server address
+2. Create a `config.yaml` file from the template:
 
-3. Start Redis (if not already running):
+```bash
+cp config.example.yaml config.yaml
+```
+
+3. Edit `.env` and set your actual values:
+   - `SLACK_BOT_TOKEN` - Your Slack bot token
+   - `REDIS_PASSWORD` - Your Redis password, if required
+
+4. Update `redis.addr` in `config.yaml` if Redis is not available at `localhost:6379`.
+
+5. Start Redis (if not already running):
 
 ```bash
 # Using Docker
@@ -269,7 +277,7 @@ If the Slack message doesn't have PR metadata, the service should log:
 ### Service won't start
 
 - Check that `SLACK_BOT_TOKEN` is set
-- Verify Redis is accessible at `REDIS_ADDR`
+- Verify Redis is accessible at the `redis.addr` value in `config.yaml`
 
 ### No Poppit commands generated
 
