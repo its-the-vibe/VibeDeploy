@@ -2,327 +2,74 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
-	"github.com/redis/go-redis/v9"
-	"github.com/slack-go/slack"
-	"gopkg.in/yaml.v3"
+	"github.com/its-the-vibe/VibeDeploy/internal/config"
+	redisclient "github.com/its-the-vibe/VibeDeploy/internal/redis"
+	slackclient "github.com/its-the-vibe/VibeDeploy/internal/slack"
 )
 
-type Config struct {
-	RedisAddr          string
-	RedisPassword      string
-	SlackToken         string
-	BaseDir            string
-	RedisPubSub        string
-	RedisListName      string
-	RedisOutputChannel string
-	RedisReactionList  string
-	LogLevel           LogLevel
-	DockerOverride     string
-	AllowedRepos       map[string]bool
-	LegacyDockerApps   map[string]bool
-}
+var currentLogLevel = config.INFO
 
-type VibeDeployYamlConfig struct {
-	Redis struct {
-		Addr          string `yaml:"addr"`
-		PubSubChannel string `yaml:"pubsub_channel"`
-		ListName      string `yaml:"list_name"`
-		OutputChannel string `yaml:"output_channel"`
-		ReactionList  string `yaml:"reaction_list"`
-	} `yaml:"redis"`
-	BaseDir          string   `yaml:"base_dir"`
-	LogLevel         string   `yaml:"log_level"`
-	AllowedRepos     []string `yaml:"allowed_repos"`
-	LegacyDockerApps []string `yaml:"legacy_docker_apps"`
-	DockerOverride   string   `yaml:"docker_override"`
-}
-
-const RocketReaction = "rocket"
-const GearReaction = "gear"
-const ClassicalBuildingReaction = "classical_building"
-const VibeDeployType = "vibe-deploy"
-const DeploymentCommand = "docker compose up -d"
-const DefaultDockerOverride = "../vibebox/docker-override/docker-override"
-const DockerOverrideCommandTemplate = "[dockerOverride] create --override-tag feature"
-const DefaultConfigFile = "config.yaml"
-
-// LogLevel represents the severity of a log message
-type LogLevel int
-
-const (
-	DEBUG LogLevel = iota
-	INFO
-	WARN
-	ERROR
-)
-
-// currentLogLevel is set once at startup before any goroutines are created,
-// then only read during runtime, so no synchronization is needed
-var currentLogLevel = INFO // Default log level
-
-// String returns the string representation of a log level
-func (l LogLevel) String() string {
-	switch l {
-	case DEBUG:
-		return "DEBUG"
-	case INFO:
-		return "INFO"
-	case WARN:
-		return "WARN"
-	case ERROR:
-		return "ERROR"
-	default:
-		return "UNKNOWN"
-	}
-}
-
-// parseLogLevel converts a string to a LogLevel
-func parseLogLevel(level string) LogLevel {
-	switch strings.ToUpper(level) {
-	case "DEBUG":
-		return DEBUG
-	case "INFO":
-		return INFO
-	case "WARN":
-		return WARN
-	case "ERROR":
-		return ERROR
-	default:
-		return INFO
-	}
-}
-
-// logDebug logs a debug message
 func logDebug(format string, v ...interface{}) {
-	if currentLogLevel <= DEBUG {
+	if currentLogLevel <= config.DEBUG {
 		log.Printf("[DEBUG] "+format, v...)
 	}
 }
 
-// logInfo logs an info message
 func logInfo(format string, v ...interface{}) {
-	if currentLogLevel <= INFO {
+	if currentLogLevel <= config.INFO {
 		log.Printf("[INFO] "+format, v...)
 	}
 }
 
-// logWarn logs a warning message
 func logWarn(format string, v ...interface{}) {
-	if currentLogLevel <= WARN {
+	if currentLogLevel <= config.WARN {
 		log.Printf("[WARN] "+format, v...)
 	}
 }
 
-// logError logs an error message
 func logError(format string, v ...interface{}) {
-	if currentLogLevel <= ERROR {
+	if currentLogLevel <= config.ERROR {
 		log.Printf("[ERROR] "+format, v...)
 	}
 }
 
-type ReactionEvent struct {
-	Event struct {
-		Type     string `json:"type"`
-		User     string `json:"user"`
-		Reaction string `json:"reaction"`
-		Item     struct {
-			Type    string `json:"type"`
-			Channel string `json:"channel"`
-			Ts      string `json:"ts"`
-		} `json:"item"`
-	} `json:"event"`
-	Authorizations []struct {
-		UserID string `json:"user_id"`
-		IsBot  bool   `json:"is_bot"`
-	} `json:"authorizations"`
-}
-
-type PRMetadata struct {
-	PRNumber    int    `json:"pr_number"`
-	Repository  string `json:"repository"`
-	PRUrl       string `json:"pr_url"`
-	Author      string `json:"author"`
-	Branch      string `json:"branch"`
-	EventAction string `json:"event_action"`
-}
-
-type PoppitCommand struct {
-	Repo     string           `json:"repo"`
-	Branch   string           `json:"branch"`
-	Type     string           `json:"type"`
-	Dir      string           `json:"dir"`
-	Commands []string         `json:"commands"`
-	Metadata *CommandMetadata `json:"metadata,omitempty"`
-}
-
-type CommandMetadata struct {
-	Channel         string `json:"channel"`
-	Ts              string `json:"ts"`
-	TriggerReaction string `json:"trigger_reaction,omitempty"`
-}
-
-type CommandOutput struct {
-	Metadata *CommandMetadata `json:"metadata"`
-	Type     string           `json:"type"`
-	Command  string           `json:"command"`
-	Output   string           `json:"output"`
-}
-
-type SlackReaction struct {
-	Reaction string `json:"reaction"`
-	Channel  string `json:"channel"`
-	Ts       string `json:"ts"`
-	Remove   bool   `json:"remove,omitempty"`
-}
-
-func loadConfig() (Config, error) {
-	return loadConfigFromFile(getEnv("CONFIG_FILE", DefaultConfigFile))
-}
-
-func loadConfigFromFile(configPath string) (Config, error) {
-	config := Config{
-		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
-		SlackToken:         getEnv("SLACK_BOT_TOKEN", ""),
-		RedisAddr:          "localhost:6379",
-		BaseDir:            "/app/repos",
-		RedisPubSub:        "slack-relay-reaction-added",
-		RedisListName:      "poppit-commands",
-		RedisOutputChannel: "poppit:command-output",
-		RedisReactionList:  "slack_reactions",
-		LogLevel:           INFO,
-		DockerOverride:     DefaultDockerOverride,
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return config, nil
-		}
-		return Config{}, fmt.Errorf("failed to read config file %s: %w", configPath, err)
-	}
-
-	var yamlConfig VibeDeployYamlConfig
-	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
-		return Config{}, fmt.Errorf("failed to parse config file %s: %w", configPath, err)
-	}
-
-	if yamlConfig.Redis.Addr != "" {
-		config.RedisAddr = yamlConfig.Redis.Addr
-	}
-	if yamlConfig.Redis.PubSubChannel != "" {
-		config.RedisPubSub = yamlConfig.Redis.PubSubChannel
-	}
-	if yamlConfig.Redis.ListName != "" {
-		config.RedisListName = yamlConfig.Redis.ListName
-	}
-	if yamlConfig.Redis.OutputChannel != "" {
-		config.RedisOutputChannel = yamlConfig.Redis.OutputChannel
-	}
-	if yamlConfig.Redis.ReactionList != "" {
-		config.RedisReactionList = yamlConfig.Redis.ReactionList
-	}
-	if yamlConfig.BaseDir != "" {
-		config.BaseDir = yamlConfig.BaseDir
-	}
-	if yamlConfig.LogLevel != "" {
-		config.LogLevel = parseLogLevel(yamlConfig.LogLevel)
-	}
-	if yamlConfig.DockerOverride != "" {
-		config.DockerOverride = yamlConfig.DockerOverride
-	}
-	if yamlConfig.AllowedRepos != nil {
-		config.AllowedRepos = make(map[string]bool, len(yamlConfig.AllowedRepos))
-		for _, repo := range yamlConfig.AllowedRepos {
-			config.AllowedRepos[repo] = true
-		}
-	}
-	if yamlConfig.LegacyDockerApps != nil {
-		config.LegacyDockerApps = make(map[string]bool, len(yamlConfig.LegacyDockerApps))
-		for _, repo := range yamlConfig.LegacyDockerApps {
-			config.LegacyDockerApps[repo] = true
-		}
-	}
-
-	return config, nil
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// isRepoAllowed checks if a repository is in the allowed list
-// If allowedRepos is nil (no config), all repos are allowed
-func isRepoAllowed(repo string, allowedRepos map[string]bool) bool {
-	// If no allowlist is configured, allow all repos
-	if allowedRepos == nil {
-		return true
-	}
-
-	// Check if repo is in the allowlist
-	return allowedRepos[repo]
-}
-
-// isLegacyDockerApp checks if a repository is in the legacy docker apps list
-func isLegacyDockerApp(repo string, legacyApps map[string]bool) bool {
-	if legacyApps == nil {
-		return false
-	}
-	return legacyApps[repo]
-}
-
 func main() {
-	config, err := loadConfig()
+	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Set the global log level
-	currentLogLevel = config.LogLevel
+	currentLogLevel = cfg.LogLevel
 
-	if config.SlackToken == "" {
+	if cfg.SlackToken == "" {
 		log.Fatal("SLACK_BOT_TOKEN environment variable is required")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Setup Redis client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     config.RedisAddr,
-		Password: config.RedisPassword,
-	})
+	redisClient := redisclient.NewClient(cfg)
 	defer redisClient.Close()
 
-	// Test Redis connection
-	if err := redisClient.Ping(ctx).Err(); err != nil {
+	if err := redisClient.Ping(ctx); err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
-	logInfo("Connected to Redis at %s", config.RedisAddr)
+	logInfo("Connected to Redis at %s", cfg.RedisAddr)
 
-	// Setup Slack client
-	slackClient := slack.New(config.SlackToken)
+	slackClient := slackclient.NewClient(cfg.SlackToken)
 
-	// Subscribe to Redis pub/sub channel
-	pubsub := redisClient.Subscribe(ctx, config.RedisPubSub)
+	pubsub := redisClient.Subscribe(ctx, cfg.RedisPubSub)
 	defer pubsub.Close()
 
-	logInfo("Subscribed to Redis channel: %s (log level: %s)", config.RedisPubSub, config.LogLevel.String())
+	logInfo("Subscribed to Redis channel: %s (log level: %s)", cfg.RedisPubSub, cfg.LogLevel.String())
 
-	// Start command output listener in a goroutine
-	go listenForCommandOutput(ctx, redisClient, config)
+	go listenForCommandOutput(ctx, redisClient, cfg)
 
-	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
@@ -332,7 +79,6 @@ func main() {
 		cancel()
 	}()
 
-	// Process messages
 	ch := pubsub.Channel()
 	for {
 		select {
@@ -343,316 +89,8 @@ func main() {
 			if msg == nil {
 				continue
 			}
-			logDebug("Received message from channel: %s", config.RedisPubSub)
-			processReactionEvent(ctx, msg.Payload, slackClient, redisClient, config, config.AllowedRepos, config.LegacyDockerApps)
+			logDebug("Received message from channel: %s", cfg.RedisPubSub)
+			processReactionEvent(ctx, msg.Payload, slackClient, redisClient, cfg)
 		}
 	}
-}
-
-func processReactionEvent(ctx context.Context, payload string, slackClient *slack.Client, redisClient *redis.Client, config Config, allowedRepos map[string]bool, legacyApps map[string]bool) {
-	var event ReactionEvent
-	if err := json.Unmarshal([]byte(payload), &event); err != nil {
-		logError("Error parsing reaction event: %v", err)
-		return
-	}
-
-	// Only process supported emoji reactions
-	reaction := event.Event.Reaction
-	if reaction != RocketReaction && reaction != ClassicalBuildingReaction {
-		logDebug("Ignoring reaction: %s (not %s or %s)", reaction, RocketReaction, ClassicalBuildingReaction)
-		return
-	}
-
-	// Only process message items
-	if event.Event.Item.Type != "message" {
-		logDebug("Ignoring item type: %s (not message)", event.Event.Item.Type)
-		return
-	}
-
-	// Check if the reaction is from the bot itself by comparing with authorizations
-	for _, auth := range event.Authorizations {
-		if auth.IsBot && auth.UserID == event.Event.User {
-			logInfo("Ignoring %s reaction from bot user %s on message %s in channel %s", reaction, event.Event.User, event.Event.Item.Ts, event.Event.Item.Channel)
-			return
-		}
-	}
-
-	logInfo("Processing %s reaction on message %s in channel %s", reaction, event.Event.Item.Ts, event.Event.Item.Channel)
-
-	// Fetch message from Slack
-	metadata, err := getMessageMetadata(slackClient, event.Event.Item.Channel, event.Event.Item.Ts)
-	if err != nil {
-		logError("Error getting message metadata: %v", err)
-		return
-	}
-
-	if metadata == nil {
-		logDebug("No PR metadata found in message, skipping")
-		return
-	}
-
-	logInfo("Found PR metadata: %s #%d (branch: %s)", metadata.Repository, metadata.PRNumber, metadata.Branch)
-
-	// Check if repository is allowed
-	if !isRepoAllowed(metadata.Repository, allowedRepos) {
-		logInfo("Repository %s is not in the allowed list, ignoring reaction", metadata.Repository)
-		return
-	}
-
-	// Publish gear reaction to indicate deployment is starting
-	if err := publishSlackReaction(ctx, redisClient, event.Event.Item.Channel, event.Event.Item.Ts, GearReaction, false, config); err != nil {
-		logError("Error publishing gear reaction: %v", err)
-		// Continue even if reaction fails - deployment should still proceed
-	} else {
-		logInfo("Published gear reaction for channel %s, message %s", event.Event.Item.Channel, event.Event.Item.Ts)
-	}
-
-	// Create and publish Poppit command
-	var poppitCmd PoppitCommand
-	if reaction == ClassicalBuildingReaction {
-		poppitCmd = createMainBranchPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
-	} else if isLegacyDockerApp(metadata.Repository, legacyApps) {
-		poppitCmd = createPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
-	} else {
-		poppitCmd = createGHAEnabledPoppitCommand(metadata, config, event.Event.Item.Channel, event.Event.Item.Ts)
-	}
-	if err := publishPoppitCommand(ctx, redisClient, poppitCmd, config); err != nil {
-		logError("Error publishing Poppit command: %v", err)
-		return
-	}
-
-	logInfo("Successfully published Poppit command for %s branch %s", metadata.Repository, poppitCmd.Branch)
-}
-
-func getMessageMetadata(slackClient *slack.Client, channel, timestamp string) (*PRMetadata, error) {
-	// Fetch the message
-	historyParams := &slack.GetConversationHistoryParameters{
-		ChannelID:          channel,
-		Latest:             timestamp,
-		Inclusive:          true,
-		Limit:              1,
-		IncludeAllMetadata: true,
-	}
-
-	history, err := slackClient.GetConversationHistory(historyParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get conversation history: %w", err)
-	}
-
-	if len(history.Messages) == 0 {
-		return nil, fmt.Errorf("no messages found")
-	}
-
-	message := history.Messages[0]
-
-	// Check if message has metadata
-	if len(message.Metadata.EventPayload) == 0 {
-		return nil, nil
-	}
-
-	// Parse metadata
-	metadataJSON, err := json.Marshal(message.Metadata.EventPayload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	var metadata PRMetadata
-	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse PR metadata: %w", err)
-	}
-
-	// Verify required fields are present
-	if metadata.Repository == "" || metadata.Branch == "" {
-		return nil, nil
-	}
-
-	return &metadata, nil
-}
-
-func createPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp string) PoppitCommand {
-	dir := fmt.Sprintf("%s/%s", config.BaseDir, metadata.Repository)
-
-	return PoppitCommand{
-		Repo:   metadata.Repository,
-		Branch: metadata.Branch,
-		Type:   VibeDeployType,
-		Dir:    dir,
-		Commands: []string{
-			"git fetch origin",
-			fmt.Sprintf("git checkout %s", metadata.Branch),
-			"git pull",
-			"docker compose build",
-			"docker compose down",
-			DeploymentCommand,
-			// try commenting out checking out main,
-			// so that projects which rely on the feature branch files
-			// might work
-			// "git checkout main",
-		},
-		Metadata: &CommandMetadata{
-			Channel:         channel,
-			Ts:              timestamp,
-			TriggerReaction: RocketReaction,
-		},
-	}
-}
-
-func createGHAEnabledPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp string) PoppitCommand {
-	dir := fmt.Sprintf("%s/%s", config.BaseDir, metadata.Repository)
-
-	dockerOverridePath := config.DockerOverride
-	if dockerOverridePath == "" {
-		dockerOverridePath = DefaultDockerOverride
-	}
-
-	dockerOverrideCmd := strings.ReplaceAll(DockerOverrideCommandTemplate, "[dockerOverride]", dockerOverridePath)
-
-	return PoppitCommand{
-		Repo:   metadata.Repository,
-		Branch: metadata.Branch,
-		Type:   VibeDeployType,
-		Dir:    dir,
-		Commands: []string{
-			"git fetch",
-			fmt.Sprintf("git checkout %s", metadata.Branch),
-			dockerOverrideCmd,
-			fmt.Sprintf("gh label create \"feature\" --color \"f107a3\" --force --repo %s", metadata.Repository),
-			fmt.Sprintf("gh pr edit --add-label \"feature\" %s", metadata.PRUrl),
-		},
-		Metadata: &CommandMetadata{
-			Channel:         channel,
-			Ts:              timestamp,
-			TriggerReaction: RocketReaction,
-		},
-	}
-}
-
-func createMainBranchPoppitCommand(metadata *PRMetadata, config Config, channel, timestamp string) PoppitCommand {
-	dir := fmt.Sprintf("%s/%s", config.BaseDir, metadata.Repository)
-
-	return PoppitCommand{
-		Repo:   metadata.Repository,
-		Branch: "main",
-		Type:   VibeDeployType,
-		Dir:    dir,
-		Commands: []string{
-			"git checkout main",
-			"git pull",
-			"docker compose build",
-			"docker compose down",
-			DeploymentCommand,
-		},
-		Metadata: &CommandMetadata{
-			Channel:         channel,
-			Ts:              timestamp,
-			TriggerReaction: ClassicalBuildingReaction,
-		},
-	}
-}
-
-func publishPoppitCommand(ctx context.Context, redisClient *redis.Client, cmd PoppitCommand, config Config) error {
-	payload, err := json.Marshal(cmd)
-	if err != nil {
-		return fmt.Errorf("failed to marshal Poppit command: %w", err)
-	}
-
-	if err := redisClient.RPush(ctx, config.RedisListName, payload).Err(); err != nil {
-		return fmt.Errorf("failed to push to Redis list: %w", err)
-	}
-
-	return nil
-}
-
-func listenForCommandOutput(ctx context.Context, redisClient *redis.Client, config Config) {
-	// Subscribe to command output channel
-	pubsub := redisClient.Subscribe(ctx, config.RedisOutputChannel)
-	defer pubsub.Close()
-
-	logInfo("Subscribed to Redis channel: %s", config.RedisOutputChannel)
-
-	// Process messages
-	ch := pubsub.Channel()
-	for {
-		select {
-		case <-ctx.Done():
-			logInfo("Command output listener context cancelled, exiting")
-			return
-		case msg := <-ch:
-			if msg == nil {
-				continue
-			}
-			logDebug("Received command output message from channel: %s", config.RedisOutputChannel)
-			processCommandOutput(ctx, msg.Payload, redisClient, config)
-		}
-	}
-}
-
-func processCommandOutput(ctx context.Context, payload string, redisClient *redis.Client, config Config) {
-	var output CommandOutput
-	if err := json.Unmarshal([]byte(payload), &output); err != nil {
-		logError("Error parsing command output: %v", err)
-		return
-	}
-
-	// Only process vibe-deploy type commands
-	if output.Type != VibeDeployType {
-		logDebug("Ignoring command output type: %s (not %s)", output.Type, VibeDeployType)
-		return
-	}
-
-	// Only process docker compose up -d command
-	if output.Command != DeploymentCommand {
-		logDebug("Ignoring command: %s (not %s)", output.Command, DeploymentCommand)
-		return
-	}
-
-	// Check if metadata is present
-	if output.Metadata == nil {
-		logWarn("Command output missing metadata (channel and timestamp required), cannot send reaction")
-		return
-	}
-
-	logInfo("Processing completion for %s in channel %s, message %s", VibeDeployType, output.Metadata.Channel, output.Metadata.Ts)
-
-	// Remove gear reaction to indicate deployment is no longer in progress
-	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, GearReaction, true, config); err != nil {
-		logError("Error removing gear reaction: %v", err)
-		// Continue even if reaction removal fails
-	} else {
-		logInfo("Removed gear reaction for channel %s, message %s", output.Metadata.Channel, output.Metadata.Ts)
-	}
-
-	// Determine which emoji to add on completion based on the trigger reaction
-	completionReaction := output.Metadata.TriggerReaction
-	if completionReaction == "" {
-		completionReaction = RocketReaction
-	}
-
-	// Publish completion reaction to indicate success
-	if err := publishSlackReaction(ctx, redisClient, output.Metadata.Channel, output.Metadata.Ts, completionReaction, false, config); err != nil {
-		logError("Error publishing %s reaction: %v", completionReaction, err)
-		// Continue even if final reaction fails - deployment was still successful
-	} else {
-		logInfo("Successfully published %s reaction for channel %s, message %s", completionReaction, output.Metadata.Channel, output.Metadata.Ts)
-	}
-}
-
-func publishSlackReaction(ctx context.Context, redisClient *redis.Client, channel, timestamp, reaction string, remove bool, config Config) error {
-	slackReaction := SlackReaction{
-		Reaction: reaction,
-		Channel:  channel,
-		Ts:       timestamp,
-		Remove:   remove,
-	}
-
-	payload, err := json.Marshal(slackReaction)
-	if err != nil {
-		return fmt.Errorf("failed to marshal slack reaction: %w", err)
-	}
-
-	if err := redisClient.RPush(ctx, config.RedisReactionList, payload).Err(); err != nil {
-		return fmt.Errorf("failed to push to Redis list: %w", err)
-	}
-
-	return nil
 }

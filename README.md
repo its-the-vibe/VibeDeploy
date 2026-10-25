@@ -19,6 +19,17 @@ VibeDeploy is a Go service that listens for Slack emoji reactions (specifically 
 - Publishes deployment commands to Redis list for Poppit execution
 - **Command output listening** - Listens for deployment completion, removes the gear emoji, and sends a rocket emoji reaction to indicate success
 
+## Code Organization
+
+The executable entry point and event orchestration are in the root package.
+Supporting responsibilities are separated into focused internal packages:
+
+- `internal/config` loads YAML settings and environment-based credentials.
+- `internal/domain` defines event, metadata, and command types.
+- `internal/deployment` builds deployment commands and applies repository rules.
+- `internal/slack` encapsulates Slack message metadata retrieval.
+- `internal/redis` encapsulates Redis connections and list operations.
+
 ## Configuration
 
 Sensitive credentials are kept in `.env`; all non-sensitive settings belong in
