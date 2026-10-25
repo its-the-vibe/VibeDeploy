@@ -179,6 +179,8 @@ func TestCreateGHAEnabledPoppitCommand(t *testing.T) {
 			"git checkout feature/my-branch",
 			"../vibebox/docker-override/docker-override create --override-tag feature",
 			"gh label create \"feature\" --color \"f107a3\" --force --repo its-the-vibe/VibeMerge",
+			"gh pr edit --remove-label \"feature\" https://github.com/its-the-vibe/VibeMerge/pull/42",
+			"sleep 5",
 			"gh pr edit --add-label \"feature\" https://github.com/its-the-vibe/VibeMerge/pull/42",
 		}
 
