@@ -93,3 +93,34 @@ func TestCreateMainBranchPoppitCommand(t *testing.T) {
 		t.Errorf("unexpected main branch command: %+v", cmd)
 	}
 }
+
+func TestShouldProcessWorkflowRun(t *testing.T) {
+	tests := []struct {
+		action, sender string
+		want           bool
+	}{
+		{"requested", "User", true},
+		{"requested", "Bot", false},
+		{"completed", "User", false},
+	}
+	for _, tt := range tests {
+		e := &domain.WorkflowRunEvent{Action: tt.action}
+		e.Sender.Type = tt.sender
+		if got := ShouldProcessWorkflowRun(e); got != tt.want {
+			t.Errorf("ShouldProcessWorkflowRun(%s, %s) = %v, want %v", tt.action, tt.sender, got, tt.want)
+		}
+	}
+}
+
+func TestCreateWorkflowRerunPoppitCommand(t *testing.T) {
+	e := &domain.WorkflowRunEvent{}
+	e.Repository.FullName = "its-the-vibe/VibeMerge"
+	e.WorkflowRun.ID = 41909666536
+	cmd := CreateWorkflowRerunPoppitCommand(e, config.Config{BaseDir: "/app/repos"})
+
+	want := []string{"gh run rerun 41909666536 --repo its-the-vibe/VibeMerge"}
+	if !reflect.DeepEqual(cmd.Commands, want) || cmd.Repo != "its-the-vibe/VibeMerge" ||
+		cmd.Dir != "/app/repos/its-the-vibe/VibeMerge" || cmd.Type != domain.WorkflowRerunType {
+		t.Errorf("unexpected command: %+v", cmd)
+	}
+}

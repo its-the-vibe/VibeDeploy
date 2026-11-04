@@ -141,3 +141,53 @@ func processCommandOutput(ctx context.Context, payload string, redisClient *redi
 		logInfo("Successfully published %s reaction for channel %s, message %s", completionReaction, output.Metadata.Channel, output.Metadata.Ts)
 	}
 }
+
+func listenForWorkflowRuns(ctx context.Context, redisClient *redisclient.Client, cfg config.Config) {
+	pubsub := redisClient.Subscribe(ctx, cfg.WorkflowRunChannel)
+	defer pubsub.Close()
+
+	logInfo("Subscribed to Redis channel: %s", cfg.WorkflowRunChannel)
+
+	ch := pubsub.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			logInfo("Workflow run listener context cancelled, exiting")
+			return
+		case msg := <-ch:
+			if msg == nil {
+				continue
+			}
+			logDebug("Received workflow run message from channel: %s", cfg.WorkflowRunChannel)
+			processWorkflowRunEvent(ctx, msg.Payload, redisClient, cfg)
+		}
+	}
+}
+
+func processWorkflowRunEvent(ctx context.Context, payload string, redisClient *redisclient.Client, cfg config.Config) {
+	var event domain.WorkflowRunEvent
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		logError("Error parsing workflow run event: %v", err)
+		return
+	}
+
+	if !deployment.ShouldProcessWorkflowRun(&event) {
+		logDebug("Ignoring workflow run event: action=%s, sender type=%s", event.Action, event.Sender.Type)
+		return
+	}
+
+	if event.Repository.FullName == "" || event.WorkflowRun.ID == 0 {
+		logWarn("Workflow run event missing repository or run id, ignoring")
+		return
+	}
+
+	logInfo("Processing workflow run %d for %s", event.WorkflowRun.ID, event.Repository.FullName)
+
+	poppitCmd := deployment.CreateWorkflowRerunPoppitCommand(&event, cfg)
+	if err := redisClient.PublishPoppitCommand(ctx, poppitCmd, cfg); err != nil {
+		logError("Error publishing workflow rerun command: %v", err)
+		return
+	}
+
+	logInfo("Successfully published workflow rerun command for %s run %d", event.Repository.FullName, event.WorkflowRun.ID)
+}

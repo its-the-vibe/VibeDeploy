@@ -70,6 +70,12 @@ func main() {
 
 	go listenForCommandOutput(ctx, redisClient, cfg)
 
+	if cfg.WorkflowRunEnabled {
+		go listenForWorkflowRuns(ctx, redisClient, cfg)
+	} else {
+		logInfo("Workflow run listener disabled")
+	}
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
