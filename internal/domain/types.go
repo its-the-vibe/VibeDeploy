@@ -74,6 +74,7 @@ type WorkflowRunEvent struct {
 		Type string `json:"type"`
 	} `json:"sender"`
 	WorkflowRun struct {
-		ID int64 `json:"id"`
+		ID     int64  `json:"id"`
+		Status string `json:"status"`
 	} `json:"workflow_run"`
 }

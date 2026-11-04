@@ -99,7 +99,9 @@ func commandMetadata(channel, timestamp, reaction string) *domain.CommandMetadat
 }
 
 func ShouldProcessWorkflowRun(event *domain.WorkflowRunEvent) bool {
-	return event.Action == "requested" && event.Sender.Type == "User"
+	return event.Action == "requested" &&
+		event.Sender.Type == "User" &&
+		event.WorkflowRun.Status == "completed"
 }
 
 func CreateWorkflowRerunPoppitCommand(event *domain.WorkflowRunEvent, cfg config.Config) domain.PoppitCommand {

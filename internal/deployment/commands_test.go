@@ -96,16 +96,18 @@ func TestCreateMainBranchPoppitCommand(t *testing.T) {
 
 func TestShouldProcessWorkflowRun(t *testing.T) {
 	tests := []struct {
-		action, sender string
-		want           bool
+		action, sender, status string
+		want                   bool
 	}{
-		{"requested", "User", true},
-		{"requested", "Bot", false},
-		{"completed", "User", false},
+		{"requested", "User", "completed", true},
+		{"requested", "Bot", "completed", false},
+		{"completed", "User", "completed", false},
+		{"requested", "User", "queued", false},
 	}
 	for _, tt := range tests {
 		e := &domain.WorkflowRunEvent{Action: tt.action}
 		e.Sender.Type = tt.sender
+		e.WorkflowRun.Status = tt.status
 		if got := ShouldProcessWorkflowRun(e); got != tt.want {
 			t.Errorf("ShouldProcessWorkflowRun(%s, %s) = %v, want %v", tt.action, tt.sender, got, tt.want)
 		}
