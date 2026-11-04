@@ -17,6 +17,8 @@ type Config struct {
 	RedisListName      string
 	RedisOutputChannel string
 	RedisReactionList  string
+	WorkflowRunChannel string
+	WorkflowRunEnabled bool
 	LogLevel           LogLevel
 	DockerOverride     string
 	AllowedRepos       map[string]bool
@@ -31,6 +33,10 @@ type VibeDeployYamlConfig struct {
 		OutputChannel string `yaml:"output_channel"`
 		ReactionList  string `yaml:"reaction_list"`
 	} `yaml:"redis"`
+	WorkflowRun struct {
+		Enabled *bool  `yaml:"enabled"`
+		Channel string `yaml:"channel"`
+	} `yaml:"workflow_run"`
 	BaseDir          string   `yaml:"base_dir"`
 	LogLevel         string   `yaml:"log_level"`
 	AllowedRepos     []string `yaml:"allowed_repos"`
@@ -39,8 +45,9 @@ type VibeDeployYamlConfig struct {
 }
 
 const (
-	DefaultConfigFile     = "config.yaml"
-	DefaultDockerOverride = "../vibebox/docker-override/docker-override"
+	DefaultConfigFile         = "config.yaml"
+	DefaultWorkflowRunChannel = "github-webhook-workflow-run"
+	DefaultDockerOverride     = "../vibebox/docker-override/docker-override"
 )
 
 type LogLevel int
@@ -96,6 +103,8 @@ func LoadFromFile(configPath string) (Config, error) {
 		RedisListName:      "poppit-commands",
 		RedisOutputChannel: "poppit:command-output",
 		RedisReactionList:  "slack_reactions",
+		WorkflowRunChannel: DefaultWorkflowRunChannel,
+		WorkflowRunEnabled: true,
 		LogLevel:           INFO,
 		DockerOverride:     DefaultDockerOverride,
 	}
@@ -127,6 +136,12 @@ func LoadFromFile(configPath string) (Config, error) {
 	}
 	if yamlConfig.Redis.ReactionList != "" {
 		config.RedisReactionList = yamlConfig.Redis.ReactionList
+	}
+	if yamlConfig.WorkflowRun.Channel != "" {
+		config.WorkflowRunChannel = yamlConfig.WorkflowRun.Channel
+	}
+	if yamlConfig.WorkflowRun.Enabled != nil {
+		config.WorkflowRunEnabled = *yamlConfig.WorkflowRun.Enabled
 	}
 	if yamlConfig.BaseDir != "" {
 		config.BaseDir = yamlConfig.BaseDir

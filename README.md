@@ -268,6 +268,14 @@ VibeDeploy publishes reaction messages to the `slack_reactions` Redis list for S
 }
 ```
 
+## GitHub Workflow Run Events
+
+VibeDeploy also subscribes to the `github-webhook-workflow-run` Redis channel (configurable via `workflow_run.channel`; disable with `workflow_run.enabled: false`). Events with `action` `requested` and `sender.type` `User` publish a Poppit command running `gh run rerun <workflow_run.id> --repo <owner>/<repo>`; all other events are ignored.
+
+```json
+{"action": "requested", "repository": {"full_name": "owner/repo"}, "sender": {"type": "User"}, "workflow_run": {"id": 41909666536}}
+```
+
 ## Requirements
 
 - Go 1.24+

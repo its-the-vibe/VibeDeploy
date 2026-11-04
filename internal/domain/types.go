@@ -5,6 +5,7 @@ const (
 	GearReaction                  = "gear"
 	ClassicalBuildingReaction     = "classical_building"
 	VibeDeployType                = "vibe-deploy"
+	WorkflowRerunType             = "workflow-rerun"
 	DeploymentCommand             = "docker compose up -d"
 	DockerOverrideCommandTemplate = "[dockerOverride] create --override-tag feature"
 )
@@ -62,4 +63,17 @@ type SlackReaction struct {
 	Channel  string `json:"channel"`
 	Ts       string `json:"ts"`
 	Remove   bool   `json:"remove,omitempty"`
+}
+
+type WorkflowRunEvent struct {
+	Action     string `json:"action"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	Sender struct {
+		Type string `json:"type"`
+	} `json:"sender"`
+	WorkflowRun struct {
+		ID int64 `json:"id"`
+	} `json:"workflow_run"`
 }

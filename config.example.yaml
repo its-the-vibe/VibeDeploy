@@ -5,6 +5,10 @@ redis:
   output_channel: poppit:command-output
   reaction_list: slack_reactions
 
+workflow_run:
+  enabled: true
+  channel: github-webhook-workflow-run
+
 base_dir: /app/repos
 log_level: INFO
 

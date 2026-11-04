@@ -97,3 +97,19 @@ func commandMetadata(channel, timestamp, reaction string) *domain.CommandMetadat
 		TriggerReaction: reaction,
 	}
 }
+
+func ShouldProcessWorkflowRun(event *domain.WorkflowRunEvent) bool {
+	return event.Action == "requested" && event.Sender.Type == "User"
+}
+
+func CreateWorkflowRerunPoppitCommand(event *domain.WorkflowRunEvent, cfg config.Config) domain.PoppitCommand {
+	repo := event.Repository.FullName
+	return domain.PoppitCommand{
+		Repo: repo,
+		Type: domain.WorkflowRerunType,
+		Dir:  fmt.Sprintf("%s/%s", cfg.BaseDir, repo),
+		Commands: []string{
+			fmt.Sprintf("gh run rerun %d --repo %s", event.WorkflowRun.ID, repo),
+		},
+	}
+}
